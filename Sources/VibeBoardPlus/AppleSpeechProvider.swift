@@ -7,7 +7,7 @@ import Opus
 ///
 /// 音频源是 VibeBoard 硬件麦克风经 USB 上行的音频帧，**不使用电脑麦克风**
 /// （需求确认：电脑麦克风不可用，键盘端麦克风是唯一输入源）。
-/// - USB 帧为 16kHz/单声道/16-bit PCM 时直接注入；为 Opus 时经 DeviceAudioDecoder 解码后注入
+/// - USB 帧中的 Opus 载荷经 DeviceAudioDecoder 解码后注入
 /// - 本机识别（requiresOnDeviceRecognition）：无网络往返，延迟最低
 final class AppleSpeechProvider: NSObject, ASRProvider, SFSpeechRecognizerDelegate {
     let name = "apple-speech"
@@ -19,6 +19,8 @@ final class AppleSpeechProvider: NSObject, ASRProvider, SFSpeechRecognizerDelega
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var generation = UUID()
+    private var audioFrames = 0
+    private var audioSamples = 0
 
     /// 设备音频解码器（Opus→PCM；PCM 帧透传）
     private let decoder = DeviceAudioDecoder()
@@ -55,7 +57,11 @@ final class AppleSpeechProvider: NSObject, ASRProvider, SFSpeechRecognizerDelega
     }
 
     private func startOnQueue() {
-        guard isAvailable else { return }
+        guard isAvailable else {
+            diag("本机识别启动失败：Speech 不可用或未授权")
+            pipeline.broadcastText("", isFinal: true)
+            return
+        }
         task?.cancel()
         generation = UUID()
         let currentGeneration = generation
@@ -66,8 +72,11 @@ final class AppleSpeechProvider: NSObject, ASRProvider, SFSpeechRecognizerDelega
         if recognizer?.supportsOnDeviceRecognition == true {
             request.requiresOnDeviceRecognition = true
         }
+        diag("本机识别启动：设备端模式=\(request.requiresOnDeviceRecognition)")
         self.request = request
         decoder.reset()
+        audioFrames = 0
+        audioSamples = 0
 
         task = recognizer?.recognitionTask(with: request) { [weak self] result, error in
             guard let self else { return }
@@ -77,7 +86,8 @@ final class AppleSpeechProvider: NSObject, ASRProvider, SFSpeechRecognizerDelega
                     self.pipeline.broadcastText(result.bestTranscription.formattedString, isFinal: result.isFinal)
                 }
                 if error != nil || (result?.isFinal ?? false) {
-                    if error != nil, result?.isFinal != true {
+                    if let error, result?.isFinal != true {
+                        diag("本机识别错误：\(error.localizedDescription)")
                         self.pipeline.broadcastText("", isFinal: true)
                     }
                     self.request = nil
@@ -88,20 +98,27 @@ final class AppleSpeechProvider: NSObject, ASRProvider, SFSpeechRecognizerDelega
     }
 
     /// USB 设备音频帧入口（Coordinator 从 USBDeviceManager 转发过来）。
-    /// 帧格式：PCM(16k/mono/s16le) 直接注入；Opus 帧解码后注入。
+    /// 帧格式：设备 Opus 载荷解码后注入。
     private let audioQueue = DispatchQueue(label: "vibeboardplus.speech.audio")
 
     func sendAudio(_ data: Data) {
         audioQueue.async { [weak self] in
             guard let self, let request = self.request else { return }
-            for buffer in self.decoder.decode(data) {
+            let buffers = self.decoder.decode(data)
+            self.audioFrames += 1
+            for buffer in buffers {
+                self.audioSamples += Int(buffer.frameLength)
                 request.append(buffer)
+            }
+            if self.audioFrames == 1 || self.audioFrames % 50 == 0 {
+                diag("本机音频解码：\(self.audioFrames) 帧，\(self.audioSamples) 采样")
             }
         }
     }
 
     func finishSession() {
         audioQueue.async { [self] in
+            diag("本机音频输入结束：\(audioFrames) 帧，\(audioSamples) 采样")
             request?.endAudio()
             request = nil
         }
@@ -117,12 +134,11 @@ final class AppleSpeechProvider: NSObject, ASRProvider, SFSpeechRecognizerDelega
     }
 
     func speechRecognizer(_ speechRecognizer: SFSpeechRecognizer, availabilityDidChange available: Bool) {
-        // 不可用时上层 pipeline 会自动回退到远程 provider
+        if !available { diag("本机识别服务已不可用") }
     }
 }
 
-/// 设备音频帧解码：PCM 透传 / Opus→PCM。
-/// USB 帧封装格式（JSON 还是 TLV）待真机抓包确认后在此收敛。
+/// 设备音频帧的 Opus 载荷解码为 16 kHz 单声道 PCM。
 final class DeviceAudioDecoder {
     private var opusDecoder: OpusDecoder?
 
@@ -131,52 +147,42 @@ final class DeviceAudioDecoder {
     }
 
     func decode(_ frame: Data) -> [AVAudioPCMBuffer] {
-        if isRawPCM(frame) {
-            return [makePCMBuffer(from: frame)].compactMap { $0 }
-        }
-        // Opus 帧：解码为 PCM buffer
+        guard !frame.isEmpty else { return [] }
         if opusDecoder == nil {
             opusDecoder = OpusDecoder(sampleRate: AppleSpeechProvider.deviceSampleRate,
                                       channels: AppleSpeechProvider.deviceChannels)
         }
         return [opusDecoder?.decode(frame)].compactMap { $0 }
     }
-
-    /// 简易启发：设备固件若上行裸 PCM，帧长与 16k/mono/s16 恰合（20ms=640B）。
-    /// 抓包后如有帧头魔法，在此增加识别分支。
-    private func isRawPCM(_ frame: Data) -> Bool {
-        frame.count % 2 == 0 && (frame.count == 640 || frame.count == 320 || frame.count == 1280)
-    }
-
-    private func makePCMBuffer(from pcm: Data) -> AVAudioPCMBuffer? {
-        let format = AVAudioFormat(commonFormat: .pcmFormatInt16,
-                                   sampleRate: AppleSpeechProvider.deviceSampleRate,
-                                   channels: AppleSpeechProvider.deviceChannels,
-                                   interleaved: true)!
-        let frameCount = AVAudioFrameCount(pcm.count / 2)
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { return nil }
-        buffer.frameLength = frameCount
-        pcm.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
-            buffer.int16ChannelData![0].update(from: raw.bindMemory(to: Int16.self).baseAddress!, count: Int(frameCount))
-        }
-        return buffer
-    }
 }
 
 /// Opus 解码（alta/swift-opus，libopus）：设备音频帧 → PCM buffer → 苹果本机识别
 final class OpusDecoder {
     private let decoder: Opus.Decoder?
+    private var failures = 0
 
     init(sampleRate: Double, channels: AVAudioChannelCount) {
         let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channels)
         decoder = format.flatMap { try? Opus.Decoder(format: $0) }
+        if decoder == nil { diag("设备音频解码器初始化失败") }
     }
 
     func reset() {
-        try? decoder?.reset()
+        failures = 0
+        do { try decoder?.reset() }
+        catch { diag("设备 Opus 解码器重置失败：\(error.localizedDescription)") }
     }
 
     func decode(_ frame: Data) -> AVAudioPCMBuffer? {
-        try? decoder?.decode(frame)
+        guard let decoder else { return nil }
+        do {
+            return try decoder.decode(frame)
+        } catch {
+            failures += 1
+            if failures == 1 || failures % 50 == 0 {
+                diag("设备 Opus 解码失败：\(failures) 帧，\(error.localizedDescription)")
+            }
+            return nil
+        }
     }
 }

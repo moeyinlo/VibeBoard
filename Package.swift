@@ -13,6 +13,6 @@ let package = Package(
             dependencies: [.product(name: "Opus", package: "swift-opus")],
             path: "Sources/VibeBoardPlus"
         ),
-        .testTarget(name: "VibeBoardPlusTests", dependencies: ["VibeBoardPlus"])
+        .testTarget(name: "VibeBoardPlusTests", dependencies: ["VibeBoardPlus", .product(name: "Opus", package: "swift-opus")])
     ]
 )
