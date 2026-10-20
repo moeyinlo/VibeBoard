@@ -145,7 +145,7 @@ final class VibeBoardCoordinator {
             USBDeviceManager.audioCount += 1
             sessionFrames += 1
             if sessionFrames == 1 || sessionFrames % 50 == 0 || frame.isLast {
-                diag("音频 #\(sessionFrames) session=\(frame.sessionID) bytes=\(frame.payload.count) last=\(frame.isLast)")
+                diag("音频 #\(sessionFrames) session=\(frame.sessionID) bytes=\(frame.payload.count) flags=0x\(String(frame.flags, radix: 16)) last=\(frame.isLast)")
             }
             if !frame.payload.isEmpty { activeProvider?.sendAudio(frame.payload) }
             if frame.isLast { finishVoiceSession() }

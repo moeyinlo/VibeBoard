@@ -2,7 +2,8 @@ import Foundation
 
 struct DeviceAudioFrame {
     let sessionID: UInt64
-    let isLast: Bool
+    let flags: UInt8
+    var isLast: Bool { flags & 0x02 != 0 }
     let payload: Data
 
     static func parse(_ data: Data) -> Self? {
@@ -11,7 +12,7 @@ struct DeviceAudioFrame {
         let length = Int(data[14]) | (Int(data[15]) << 8)
         guard length <= SerialDeviceLink.maxFrameLen, data.count == 16 + length else { return nil }
         let sessionID = (0..<8).reduce(UInt64(0)) { $0 | (UInt64(data[4 + $1]) << ($1 * 8)) }
-        return Self(sessionID: sessionID, isLast: data[12] != 0,
+        return Self(sessionID: sessionID, flags: data[12],
                     payload: Data(data[16...]))
     }
 }

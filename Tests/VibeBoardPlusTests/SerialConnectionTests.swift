@@ -3,14 +3,19 @@ import Darwin
 @testable import VibeBoardPlus
 
 final class SerialConnectionTests: XCTestCase {
-    func testAudioFrameKeepsSessionAndFinalFlag() throws {
+    func testAudioFrameKeepsSessionAndDecodesFinalBit() throws {
         var frame = Data([1, 1, 16, 0])
         frame.append(contentsOf: withUnsafeBytes(of: UInt64(42).littleEndian) { Data($0) })
         frame.append(contentsOf: [1, 0, 2, 0, 0x11, 0x22])
         let parsed = try XCTUnwrap(DeviceAudioFrame.parse(frame))
         XCTAssertEqual(parsed.sessionID, 42)
-        XCTAssertTrue(parsed.isLast)
+        XCTAssertEqual(parsed.flags, 1)
+        XCTAssertFalse(parsed.isLast)
         XCTAssertEqual(parsed.payload, Data([0x11, 0x22]))
+        frame[12] = 2
+        XCTAssertTrue(try XCTUnwrap(DeviceAudioFrame.parse(frame)).isLast)
+        frame[12] = 3
+        XCTAssertTrue(try XCTUnwrap(DeviceAudioFrame.parse(frame)).isLast)
         frame[12] = 0
         XCTAssertFalse(try XCTUnwrap(DeviceAudioFrame.parse(frame)).isLast)
         frame[2] = 15
@@ -28,11 +33,14 @@ final class SerialConnectionTests: XCTestCase {
         defer { Darwin.close(master); Darwin.close(slave) }
         let link = SerialDeviceLink()
         defer { link.close() }
-        let received = expectation(description: "framed device audio")
+        let received = expectation(description: "streamed device audio and final frame")
+        received.expectedFulfillmentCount = 2
+        var receivedFlags = [UInt8]()
         link.onEvent = { event in
             if case .audioFrame(let frame) = event {
                 XCTAssertEqual(frame.sessionID, 57)
-                XCTAssertTrue(frame.isLast)
+                receivedFlags.append(frame.flags)
+                XCTAssertEqual(frame.isLast, frame.flags & 2 != 0)
                 XCTAssertEqual(frame.payload, Data([0xf8, 0xff]))
                 received.fulfill()
             }
@@ -42,7 +50,10 @@ final class SerialConnectionTests: XCTestCase {
         frame.append(contentsOf: withUnsafeBytes(of: UInt64(57).littleEndian) { Data($0) })
         frame.append(contentsOf: [1, 0, 2, 0, 0xf8, 0xff])
         _ = frame.withUnsafeBytes { Darwin.write(master, $0.baseAddress, $0.count) }
+        frame[12] = 2
+        _ = frame.withUnsafeBytes { Darwin.write(master, $0.baseAddress, $0.count) }
         await fulfillment(of: [received], timeout: 3)
+        XCTAssertEqual(receivedFlags, [1, 2])
     }
 
     func testPortSelectionTracksUSBIdentityInsteadOfPortNumber() {
