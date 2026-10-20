@@ -1,0 +1,35 @@
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.hmap
+
+# Swift Package Manager
+.build/
+Packages/
+Package.resolved
+
+
+# CocoaPods
+Pods/
+
+# Generated and local configuration
+*.ipa
+*.dSYM.zip
+*.dSYM
+.env
+.env.*
+!.env.example
+
+dist/
+
+.vscode/
