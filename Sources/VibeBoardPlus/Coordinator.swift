@@ -139,13 +139,13 @@ final class VibeBoardCoordinator {
         case .audioFrame(let frame):
             guard isActiveSessionRunning else { return }
             if let recordingSessionID, frame.sessionID != recordingSessionID {
-                if frame.isLast { diag("忽略其他会话末帧 session=\(frame.sessionID)，当前=\(recordingSessionID)") }
+                if frame.isLast { diag("忽略其他会话末帧 session=\(frame.sessionID) seq=\(frame.sequenceNumber)，当前=\(recordingSessionID)") }
                 return
             }
             USBDeviceManager.audioCount += 1
             sessionFrames += 1
             if sessionFrames == 1 || sessionFrames % 50 == 0 || frame.isLast {
-                diag("音频 #\(sessionFrames) session=\(frame.sessionID) bytes=\(frame.payload.count) flags=0x\(String(frame.flags, radix: 16)) last=\(frame.isLast)")
+                diag("音频 #\(sessionFrames) session=\(frame.sessionID) seq=\(frame.sequenceNumber) bytes=\(frame.payload.count) flags=0x\(String(frame.flags, radix: 16)) last=\(frame.isLast)")
             }
             if !frame.payload.isEmpty { activeProvider?.sendAudio(frame.payload) }
             if frame.isLast { finishVoiceSession() }

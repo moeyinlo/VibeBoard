@@ -9,11 +9,16 @@ final class SerialConnectionTests: XCTestCase {
         frame.append(contentsOf: [1, 0, 2, 0, 0x11, 0x22])
         let parsed = try XCTUnwrap(DeviceAudioFrame.parse(frame))
         XCTAssertEqual(parsed.sessionID, 42)
+        XCTAssertEqual(parsed.sequenceNumber, 0)
         XCTAssertEqual(parsed.flags, 1)
         XCTAssertFalse(parsed.isLast)
         XCTAssertEqual(parsed.payload, Data([0x11, 0x22]))
         frame[12] = 2
-        XCTAssertTrue(try XCTUnwrap(DeviceAudioFrame.parse(frame)).isLast)
+        frame[8] = 0x2f
+        let finalFrame = try XCTUnwrap(DeviceAudioFrame.parse(frame))
+        XCTAssertEqual(finalFrame.sessionID, 42)
+        XCTAssertEqual(finalFrame.sequenceNumber, 47)
+        XCTAssertTrue(finalFrame.isLast)
         frame[12] = 3
         XCTAssertTrue(try XCTUnwrap(DeviceAudioFrame.parse(frame)).isLast)
         frame[12] = 0
@@ -41,6 +46,7 @@ final class SerialConnectionTests: XCTestCase {
                 XCTAssertEqual(frame.sessionID, 57)
                 receivedFlags.append(frame.flags)
                 XCTAssertEqual(frame.isLast, frame.flags & 2 != 0)
+                XCTAssertEqual(frame.sequenceNumber, frame.isLast ? 49 : 0)
                 XCTAssertEqual(frame.payload, Data([0xf8, 0xff]))
                 received.fulfill()
             }
@@ -50,6 +56,7 @@ final class SerialConnectionTests: XCTestCase {
         frame.append(contentsOf: withUnsafeBytes(of: UInt64(57).littleEndian) { Data($0) })
         frame.append(contentsOf: [1, 0, 2, 0, 0xf8, 0xff])
         _ = frame.withUnsafeBytes { Darwin.write(master, $0.baseAddress, $0.count) }
+        frame[8] = 49
         frame[12] = 2
         _ = frame.withUnsafeBytes { Darwin.write(master, $0.baseAddress, $0.count) }
         await fulfillment(of: [received], timeout: 3)

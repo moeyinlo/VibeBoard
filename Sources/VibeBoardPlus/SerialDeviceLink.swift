@@ -2,6 +2,7 @@ import Foundation
 
 struct DeviceAudioFrame {
     let sessionID: UInt64
+    let sequenceNumber: UInt32
     let flags: UInt8
     var isLast: Bool { flags & 0x02 != 0 }
     let payload: Data
@@ -11,8 +12,9 @@ struct DeviceAudioFrame {
               UInt16(data[2]) | (UInt16(data[3]) << 8) == 16 else { return nil }
         let length = Int(data[14]) | (Int(data[15]) << 8)
         guard length <= SerialDeviceLink.maxFrameLen, data.count == 16 + length else { return nil }
-        let sessionID = (0..<8).reduce(UInt64(0)) { $0 | (UInt64(data[4 + $1]) << ($1 * 8)) }
-        return Self(sessionID: sessionID, flags: data[12],
+        let sessionID = (0..<4).reduce(UInt64(0)) { $0 | (UInt64(data[4 + $1]) << ($1 * 8)) }
+        let sequenceNumber = (0..<4).reduce(UInt32(0)) { $0 | (UInt32(data[8 + $1]) << ($1 * 8)) }
+        return Self(sessionID: sessionID, sequenceNumber: sequenceNumber, flags: data[12],
                     payload: Data(data[16...]))
     }
 }
@@ -185,7 +187,7 @@ final class SerialDeviceLink {
             guard pending.count >= 4 else { return }
             let type = pending[1]
             if type == Self.frameTypeAudio {
-                // 音频帧：16 字节头，含 session ID、末帧标记和载荷长度。
+                // 音频帧：16 字节头，含 32 位 session ID、32 位序号、标记和载荷长度。
                 guard pending.count >= 16 else { return }
                 guard pending[2] == 16, pending[3] == 0 else {
                     diag("无效音频帧头，重新同步")
