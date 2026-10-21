@@ -9,7 +9,7 @@
 
 use std::fs::{self, File};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,8 +186,8 @@ pub fn ensure(model: &str, mut progress: impl FnMut(Progress)) -> Result<PathBuf
     let _ = fs::remove_file(&part);
 
     let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(10))
-        .timeout(Duration::from_secs(60))
+        .timeout_connect(Duration::from_secs(15))
+        .timeout(Duration::from_secs(600))
         .build();
 
     let mut last_error = String::new();
@@ -272,9 +272,6 @@ pub fn remove(model: &str) -> Result<(), String> {
     }
     Ok(())
 }
-
-#[cfg(unix)]
-fn _assert_send(_: &Path) {}
 
 #[cfg(test)]
 mod tests {

@@ -39,6 +39,16 @@ fn main() {
         return;
     }
 
+    if let Some(path) = &args.benchmark {
+        benchmark(path);
+        return;
+    }
+
+    if let Some(path) = &args.transcribe {
+        transcribe_file(path, &args.whisper_model);
+        return;
+    }
+
     if let Some(path) = &args.replay {
         replay(path);
         return;
@@ -497,6 +507,130 @@ impl LinkSink for ProbeSink {
     }
 }
 
+/// Minimal WAV reader: mono 16-bit PCM at any rate (resampled to 16 kHz), stereo downmixed.
+fn read_wav_pcm16_16k(path: &PathBuf) -> Result<Vec<u8>, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?;
+    if bytes.len() < 44 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return Err("不是有效的 WAV 文件".into());
+    }
+    let mut offset = 12;
+    let mut channels = 1u16;
+    let mut bits = 16u16;
+    let mut rate = 16_000u32;
+    let mut data: Option<&[u8]> = None;
+    while offset + 8 <= bytes.len() {
+        let id = &bytes[offset..offset + 4];
+        let size = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap()) as usize;
+        let body = &bytes[offset + 8..(offset + 8 + size).min(bytes.len())];
+        match id {
+            b"fmt " => {
+                channels = u16::from_le_bytes(body[2..4].try_into().unwrap()).max(1);
+                rate = u32::from_le_bytes(body[4..8].try_into().unwrap()).max(1);
+                bits = u16::from_le_bytes(body[14..16].try_into().unwrap());
+            }
+            b"data" => data = Some(body),
+            _ => {}
+        }
+        offset += 8 + size + (size & 1);
+    }
+    let data = data.ok_or("WAV 缺少 data 段")?;
+    if bits != 16 {
+        return Err(format!("只支持 16 位 PCM，当前 {bits} 位"));
+    }
+    let mut pcm: Vec<u8> = Vec::with_capacity(data.len());
+    let frames = data.len() / (2 * channels as usize);
+    for frame in 0..frames {
+        let base = frame * 2 * channels as usize;
+        pcm.extend_from_slice(&data[base..base + 2]);
+    }
+    if rate == 16_000 || pcm.is_empty() {
+        return Ok(pcm);
+    }
+    // Linear resample to 16 kHz (adequate for benchmarking).
+    let samples: Vec<i16> = pcm
+        .chunks_exact(2)
+        .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+        .collect();
+    let ratio = rate as f64 / 16_000.0;
+    let out_len = ((samples.len() as f64) / ratio) as usize;
+    let mut out = Vec::with_capacity(out_len * 2);
+    for index in 0..out_len {
+        let src = index as f64 * ratio;
+        let low = src.floor() as usize;
+        let high = (low + 1).min(samples.len() - 1);
+        let frac = src - low as f64;
+        let value = samples[low] as f64 * (1.0 - frac) + samples[high] as f64 * frac;
+        out.extend_from_slice(&(value as i16).to_le_bytes());
+    }
+    Ok(out)
+}
+
+fn transcribe_file(path: &PathBuf, model: &str) {
+    let pcm = match read_wav_pcm16_16k(path) {
+        Ok(pcm) => pcm,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    };
+    let model_path = vibeboard_core::models::path_for(model);
+    println!("模型：{}", model_path.display());
+    match vibeboard_core::asr::whisper::transcribe_pcm(&model_path, "zh", &pcm) {
+        Ok((text, stats)) => {
+            println!("识别：{text}");
+            println!("统计：{}", stats.summary());
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Runs every installed model against the same audio for an apples-to-apples comparison.
+fn benchmark(path: &PathBuf) {
+    let pcm = match read_wav_pcm16_16k(path) {
+        Ok(pcm) => pcm,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    };
+    let audio_seconds = pcm.len() as f64 / 2.0 / 16_000.0;
+    println!("音频：{}（{:.2}s）", path.display(), audio_seconds);
+    println!();
+    println!("| 模型 | 耗时 | RTF | 峰值内存 | 识别结果 |");
+    println!("|---|---|---|---|---|");
+    let mut ran = 0;
+    for spec in vibeboard_core::models::MODELS {
+        let model_path = vibeboard_core::models::path_for(spec.name);
+        if !model_path.is_file() {
+            continue;
+        }
+        ran += 1;
+        match vibeboard_core::asr::whisper::transcribe_pcm(&model_path, "zh", &pcm) {
+            Ok((text, stats)) => {
+                println!(
+                    "| {} ({:.0}MB) | {:.2}s | {:.2} | {} | {} |",
+                    spec.name,
+                    spec.size_mb,
+                    stats.duration_seconds,
+                    stats.realtime_factor,
+                    stats
+                        .peak_rss_mb
+                        .map(|mb| format!("{mb:.0}MB"))
+                        .unwrap_or_else(|| "-".into()),
+                    text.replace('|', "\\|")
+                );
+            }
+            Err(error) => println!("| {} | - | - | - | 失败：{error} |", spec.name),
+        }
+    }
+    if ran == 0 {
+        println!("没有已下载的模型。先运行：vibeboard --download-model small");
+    }
+}
+
 fn download_model(model: &str) {
     if model.is_empty() {
         eprintln!("用法：vibeboard --download-model <tiny|base|small|medium|large-v3-turbo>");
@@ -589,6 +723,8 @@ struct Args {
     model: String,
     whisper_model: String,
     download_model: Option<String>,
+    transcribe: Option<PathBuf>,
+    benchmark: Option<PathBuf>,
     asr_key: Option<String>,
     rewrite: bool,
     rewrite_model: String,
@@ -612,6 +748,8 @@ impl Args {
             model: "stepaudio-2.5-asr-stream".to_string(),
             whisper_model: "small".to_string(),
             download_model: None,
+            transcribe: None,
+            benchmark: None,
             asr_key: None,
             rewrite: false,
             rewrite_model: "step-3.5-flash".to_string(),
@@ -631,6 +769,8 @@ impl Args {
                 "--model" => args.model = iter.next().unwrap_or(args.model),
                 "--whisper-model" => args.whisper_model = iter.next().unwrap_or(args.whisper_model),
                 "--download-model" => args.download_model = Some(iter.next().unwrap_or_default()),
+                "--transcribe" => args.transcribe = iter.next().map(PathBuf::from),
+                "--benchmark" => args.benchmark = iter.next().map(PathBuf::from),
                 "--asr-key" => args.asr_key = iter.next(),
                 "--rewrite" => args.rewrite = true,
                 "--rewrite-model" => args.rewrite_model = iter.next().unwrap_or(args.rewrite_model),
@@ -678,6 +818,8 @@ fn print_help() {
            --port <path>         指定串口\n\
            --serial <mac>        指定注册序列号\n\
            --wait <n>            等待设备接入秒数（默认 20）\n\
+           --transcribe <wav>    用指定模型识别本地 WAV（默认 small）\n\
+           --benchmark <wav>     同一段 WAV 跑所有已下载模型并对比\n\
            --replay <file>       离线回放抓包字节流\n\
            --verbose             打印 debug 日志\n"
     );

@@ -216,6 +216,19 @@ impl Drop for WhisperAsr {
     }
 }
 
+pub fn transcribe_pcm(
+    model: &std::path::Path,
+    language: &str,
+    pcm16: &[u8],
+) -> Result<(String, LocalStats), String> {
+    transcribe(
+        &model.to_path_buf(),
+        language,
+        pcm16,
+        &AtomicBool::new(false),
+    )
+}
+
 fn transcribe(
     model: &PathBuf,
     language: &str,
