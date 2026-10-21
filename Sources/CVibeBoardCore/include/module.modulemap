@@ -1,0 +1,5 @@
+module CVibeBoardCore {
+    header "vibeboard_core.h"
+    link "c++"
+    export *
+}

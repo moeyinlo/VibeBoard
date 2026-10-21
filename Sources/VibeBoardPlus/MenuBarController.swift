@@ -63,7 +63,7 @@ final class MenuBarController: NSObject {
     func receive(_ text: String) {
         latestText = text
         status.title = "识别完成"
-        guard settings.rewrite, !text.isEmpty else {
+        guard settings.rewrite, !text.isEmpty, SemanticRewriter.isAvailable else {
             output.receive(text, final: true)
             return
         }
@@ -87,12 +87,14 @@ final class MenuBarController: NSObject {
                 guard let self, self.generation == current else { return }
                 self.rewriteTimeout?.cancel()
                 self.latestText = cleaned
+                vlog("[rewrite] \(cleaned)")
                 self.output.receive(cleaned, final: true)
                 self.status.title = "整理完成"
                 self.output.status("整理完成")
             } catch {
                 guard let self, self.generation == current else { return }
                 self.rewriteTimeout?.cancel()
+                vlog("[rewrite] 失败，保留原文：\(error)")
                 self.output.receive(text, final: true)
                 self.status.title = (error as? SemanticRewriteError)?.errorDescription ?? "整理失败，已保留原文"
                 self.output.status(self.status.title)

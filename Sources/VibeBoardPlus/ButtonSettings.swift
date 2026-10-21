@@ -29,6 +29,11 @@ final class ButtonSettings {
         let values = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
         return values[button.lowercased()].flatMap(ButtonAction.init(rawValue:)) ?? .voice
     }
+    /// Stable string map for the core config (`{"k1": "voice", ...}`).
+    func dictionary() -> [String: String] {
+        Dictionary(uniqueKeysWithValues: Self.buttons.map { ($0, action(for: $0).rawValue) })
+    }
+
     func save(_ actions: [String: ButtonAction]) {
         defaults.set(actions.filter { Self.buttons.contains($0.key) }.mapValues(\.rawValue), forKey: key)
     }

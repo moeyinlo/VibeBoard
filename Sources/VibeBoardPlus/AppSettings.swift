@@ -1,7 +1,6 @@
 import AppKit
 
-enum OutputMode: String, CaseIterable {
-    case overlay, liveInput, pasteOnCompletion
+enum OutputMode: String, CaseIterable {    case overlay, liveInput, pasteOnCompletion
     var title: String {
         switch self {
         case .overlay: return "仅悬浮窗"
@@ -26,6 +25,11 @@ final class AppSettings {
         get { defaults.string(forKey: "cloudRewriteModel") ?? "step-3.5-flash" }
         set { defaults.set(newValue, forKey: "cloudRewriteModel") }
     }
+    /// Local Whisper model name: tiny | base | small | medium | large-v3-turbo.
+    var whisperModel: String {
+        get { defaults.string(forKey: "whisperModel") ?? "small" }
+        set { defaults.set(newValue, forKey: "whisperModel") }
+    }
     var rewriteEngine: String {
         get { defaults.string(forKey: "rewriteEngine") ?? "cloud" }
         set { defaults.set(newValue, forKey: "rewriteEngine") }
@@ -42,7 +46,11 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: "autoCopyResult") }
     }
     var rewrite: Bool {
-        get { defaults.bool(forKey: "semanticRewrite") }
+        get {
+            // Cloud cleanup is on by default; the user can turn it off in Settings.
+            guard defaults.object(forKey: "semanticRewrite") != nil else { return true }
+            return defaults.bool(forKey: "semanticRewrite")
+        }
         set { defaults.set(newValue, forKey: "semanticRewrite") }
     }
 }
@@ -76,6 +84,12 @@ final class SettingsWindow: NSWindowController {
     private let rewrite = NSSwitch()
     private let rewriteEngine = NSPopUpButton()
     private let provider = NSPopUpButton()
+    private let whisperModel = NSPopUpButton()
+    private let whisperDownload = NSButton(title: "下载模型", target: nil, action: nil)
+    private let whisperStatusLabel = NSTextField(labelWithString: "")
+    private let engineLabel = NSTextField(labelWithString: "")
+    private let statsLabel = NSTextField(labelWithString: "")
+    private var engineObserver: NSObjectProtocol?
     private let asrModel = NSPopUpButton()
     private let rewriteModel = NSTextField(string: "")
     private let recognitionKey = NSSecureTextField(string: "")
@@ -158,14 +172,26 @@ final class SettingsWindow: NSWindowController {
         pages[2].addArrangedSubview(NSStackView(views: [speech, access]))
         pages[3].spacing = 12
         pages[4].spacing = 12
-        provider.addItems(withTitles: ["Apple 语音识别", "StepFun 官方 API", "旧版官方中转（未就绪）"])
+        provider.addItems(withTitles: ["Apple 语音识别（本机）", "StepFun 官方 API（云端）", "本地 Whisper（离线）"])
         provider.autoenablesItems = false
-        provider.item(at: 2)?.isEnabled = false
         provider.target = self; provider.action = #selector(saveRecognition)
         addRow("识别服务", control: provider, page: pages[3])
         asrModel.addItems(withTitles: ["stepaudio-2.5-asr-stream", "step-asr-1.1-stream", "stepaudio-2.5-asr", "step-asr"])
         asrModel.target = self; asrModel.action = #selector(saveRecognition)
         addRow("语音模型", control: asrModel, page: pages[3])
+        whisperModel.addItems(withTitles: ["tiny", "base", "small", "medium", "large-v3-turbo"])
+        whisperModel.target = self; whisperModel.action = #selector(changeWhisperModel)
+        addRow("本地模型", control: whisperModel, page: pages[3])
+        whisperDownload.target = self; whisperDownload.action = #selector(downloadWhisper)
+        whisperDownload.bezelStyle = .rounded
+        addRow("模型下载", control: whisperDownload, page: pages[3])
+        for label in [whisperStatusLabel, engineLabel, statsLabel] {
+            label.font = .systemFont(ofSize: 12)
+            label.textColor = .secondaryLabelColor
+            label.maximumNumberOfLines = 3
+            label.widthAnchor.constraint(equalToConstant: 490).isActive = true
+            pages[3].addArrangedSubview(label)
+        }
         rewriteModel.widthAnchor.constraint(equalToConstant: 290).isActive = true
         rewriteModel.target = self; rewriteModel.action = #selector(saveRewrite)
         addRow("整理模型", control: rewriteModel, page: pages[4])
@@ -191,13 +217,19 @@ final class SettingsWindow: NSWindowController {
         }
         observer = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification,
                                                          object: window, queue: .main) { [weak self] _ in self?.refreshStatus() }
+        engineObserver = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification,
+                                                               object: window, queue: .main) { _ in }
+        EngineStatus.shared.onChange = { [weak self] in self?.refreshWhisperStatus() }
         refresh()
         changeTab()
         window.center()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+    deinit {
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+        if let engineObserver { NotificationCenter.default.removeObserver(engineObserver) }
+    }
 
     private func addRow(_ title: String, control: NSView, page: NSStackView) {
         let label = NSTextField(labelWithString: title)
@@ -222,16 +254,38 @@ final class SettingsWindow: NSWindowController {
         autoCopy.state = settings.autoCopy ? .on : .off
         rewrite.isEnabled = true
         rewrite.state = settings.rewrite ? .on : .off
-        rewrite.toolTip = "纠错、标点、去重复，保持原意"
+        rewrite.toolTip = "云端整理会修正同音错字、补标点、去口头语；默认复用语音识别的 StepFun Key"
         rewriteEngine.selectItem(at: settings.rewriteEngine == "local" ? 1 : 0)
         rewriteEngine.item(at: 1)?.title = SemanticRewriter.localIsAvailable ? "本地 · Apple" : "本地 · Apple（不可用）"
-        provider.selectItem(at: ["apple", "stepfun", "relay"].firstIndex(of: settings.asrProvider) ?? 0)
+        provider.selectItem(at: ["apple", "stepfun", "whisper"].firstIndex(of: settings.asrProvider) ?? 0)
+        whisperModel.selectItem(withTitle: settings.whisperModel)
         asrModel.selectItem(withTitle: settings.asrModel)
         rewriteModel.stringValue = settings.rewriteModel
         for (name, popup) in choices { popup.selectItem(withTitle: buttons.action(for: name).title) }
         refreshStatus()
     }
+    private func refreshWhisperStatus() {
+        guard let catalog = CoreHost.modelCatalog().first(where: { ($0["name"] as? String) == settings.whisperModel }) else {
+            whisperStatusLabel.stringValue = ""
+            return
+        }
+        let installed = (catalog["installed"] as? Bool) ?? false
+        let size = catalog["sizeMb"] as? Int ?? 0
+        let quality = catalog["quality"] as? String ?? ""
+        whisperStatusLabel.stringValue = installed
+            ? "已下载 · \(quality)"
+            : "未下载（约 \(size) MB）· \(quality)"
+        whisperDownload.title = installed ? "重新下载" : "下载模型"
+        if let backend = EngineStatus.shared.backend {
+            engineLabel.stringValue = "本地引擎：\(backend.active)（已编译 \(backend.compiled.joined(separator: " / "))）"
+        } else {
+            engineLabel.stringValue = "本地引擎：未启用（构建时未包含 Whisper）"
+        }
+        statsLabel.stringValue = EngineStatus.shared.lastStats?.summary ?? "尚无本地识别记录"
+    }
+
     private func refreshStatus() {
+        refreshWhisperStatus()
         recognitionKey.placeholderString = CloudKey.read(for: .recognition).isEmpty ? "StepFun API Key" : "已保存；输入新密钥可替换"
         rewriteKey.placeholderString = CloudKey.read(for: .rewrite).isEmpty ? "StepFun API Key" : "已保存；输入新密钥可替换"
         rewriteEngine.item(at: 1)?.title = SemanticRewriter.localIsAvailable ? "本地 · Apple" : "本地 · Apple（不可用）"
@@ -256,9 +310,11 @@ final class SettingsWindow: NSWindowController {
     }
     @objc private func saveRecognition() {
         guard saveKey(recognitionKey, purpose: .recognition, status: recognitionStatus) else { return }
-        settings.asrProvider = ["apple", "stepfun", "relay"][provider.indexOfSelectedItem]
+        settings.asrProvider = ["apple", "stepfun", "whisper"][provider.indexOfSelectedItem]
         settings.asrModel = asrModel.titleOfSelectedItem ?? "stepaudio-2.5-asr-stream"
+        settings.whisperModel = whisperModel.titleOfSelectedItem ?? "small"
         recognitionStatus.stringValue = "识别配置已保存，下次录音生效"
+        NotificationCenter.default.post(name: .vibeboardConfigurationChanged, object: nil)
         refreshStatus()
     }
     @objc private func saveRewrite() { _ = persistRewrite() }
@@ -293,8 +349,44 @@ final class SettingsWindow: NSWindowController {
     @objc private func authorizeSpeech() {
         AppleSpeechProvider.requestAuthorization { _ in DispatchQueue.main.async { self.refreshStatus() } }
     }
+    @objc private func changeWhisperModel() {
+        settings.whisperModel = whisperModel.titleOfSelectedItem ?? "small"
+        NotificationCenter.default.post(name: .vibeboardConfigurationChanged, object: nil)
+        refreshWhisperStatus()
+    }
+
+    @objc private func downloadWhisper() {
+        let name = whisperModel.titleOfSelectedItem ?? settings.whisperModel
+        whisperDownload.isEnabled = false
+        whisperStatusLabel.stringValue = "准备下载 \(name)…"
+        CoreHost.downloadModel(name, progress: { [weak self] fraction, received in
+            let mb = Double(received) / 1024 / 1024
+            guard let self else { return }
+            if let fraction {
+                self.whisperStatusLabel.stringValue = String(format: "下载中 %.0f%%（%.0f MB）", fraction * 100, mb)
+            } else {
+                self.whisperStatusLabel.stringValue = String(format: "下载中 %.0f MB", mb)
+            }
+        }, completion: { [weak self] error in
+            guard let self else { return }
+            self.whisperDownload.isEnabled = true
+            if let error {
+                self.whisperStatusLabel.stringValue = "下载失败：\(error)"
+            } else {
+                self.refreshWhisperStatus()
+                NotificationCenter.default.post(name: .vibeboardConfigurationChanged, object: nil)
+            }
+        })
+    }
+
     @objc private func authorizeAccess() {
         _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
         refreshStatus()
     }
+}
+
+
+extension Notification.Name {
+    /// Posted after the settings window writes anything the core needs to know about.
+    static let vibeboardConfigurationChanged = Notification.Name("vb.config.changed")
 }

@@ -13,12 +13,14 @@
 //! - [`session`] button semantics, session lifecycle and output routing
 //! - [`rewrite`] light semantic cleanup through StepFun chat completions
 //! - [`app`] discovery loop, provisioning and wiring into the session machine
+//! - [`ffi`] C ABI consumed by the Swift and C# shells
 
 pub mod app;
 pub mod asr;
 pub mod auth;
 pub mod button;
 pub mod discovery;
+pub mod ffi;
 pub mod link;
 pub mod models;
 pub mod opus;

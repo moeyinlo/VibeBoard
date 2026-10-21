@@ -168,6 +168,8 @@ pub enum SessionMessage {
     ProviderStats(Box<crate::asr::LocalStats>),
     ProviderError(String),
     RewriteDone(String),
+    /// Non-fatal notice surfaced in the tray/status line.
+    Notice(String),
     SetConfig(Box<SessionConfig>),
     Shutdown,
 }
@@ -426,6 +428,7 @@ impl Worker {
                     self.sink.status("识别完成");
                 }
             }
+            SessionMessage::Notice(text) => self.sink.status(&text),
             SessionMessage::SetConfig(config) => {
                 self.config = *config;
                 log::info!(

@@ -1,33 +1,36 @@
-import Foundation
 import AVFoundation
 import Speech
-import Opus
 
-/// 苹果系统语音识别（Speech 框架 / SFSpeechRecognizer）——设备麦克风直通模式。
+/// Apple's on-device recogniser, fed by the shared core.
 ///
-/// 音频源是 VibeBoard 硬件麦克风经 USB 上行的音频帧，**不使用电脑麦克风**
-/// （需求确认：电脑麦克风不可用，键盘端麦克风是唯一输入源）。
-/// - USB 帧中的 Opus 载荷经 DeviceAudioDecoder 解码后注入
-/// - 本机识别（requiresOnDeviceRecognition）：无网络往返，延迟最低
-final class AppleSpeechProvider: NSObject, ASRProvider, SFSpeechRecognizerDelegate {
-    let name = "apple-speech"
-    let latencyClass: LatencyClass = .local
+/// The Rust core owns the device link and decodes Opus, so this type only receives 16 kHz
+/// mono PCM16 and returns transcripts through `onText`. Results are handed back to the core
+/// with `vb_core_external_text`, which keeps device screen state and output routing in one
+/// place.
+final class AppleSpeechProvider {
+    enum State {
+        case idle
+        case recording
+        case finishing
+    }
 
-    private let pipeline: ASRPipeline
+    /// Called with (text, isFinal). Invoked on an arbitrary queue.
+    var onText: ((String, Bool) -> Void)?
+
+    private static let deviceSampleRate: Double = 16_000
+
     private let locale: Locale
     private var recognizer: SFSpeechRecognizer?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
+    private var format: AVAudioFormat?
+    private(set) var state: State = .idle
+    private var lastText = ""
     private var generation = UUID()
-    private var audioFrames = 0
-    private var audioSamples = 0
 
-    /// 设备音频解码器（Opus→PCM；PCM 帧透传）
-    private let decoder = DeviceAudioDecoder()
-
-    /// 设备音频参数（PROTOCOL.md §4-5，真机抓包后按实际值修正）
-    static let deviceSampleRate: Double = 16000
-    static let deviceChannels: AVAudioChannelCount = 1
+    init(localeIdentifier: String = "zh-CN") {
+        locale = Locale(identifier: localeIdentifier)
+    }
 
     static var isAuthorized: Bool {
         SFSpeechRecognizer.authorizationStatus() == .authorized
@@ -39,150 +42,100 @@ final class AppleSpeechProvider: NSObject, ASRProvider, SFSpeechRecognizerDelega
         }
     }
 
-    init(pipeline: ASRPipeline, localeIdentifier: String = "zh-CN") {
-        self.pipeline = pipeline
-        self.locale = Locale(identifier: localeIdentifier)
-        super.init()
-        recognizer = SFSpeechRecognizer(locale: locale)
-        recognizer?.delegate = self
-    }
-
+    /// True when on-device recognition can run (authorized + recogniser available).
     var isAvailable: Bool {
-        guard let recognizer else { return false }
-        return recognizer.isAvailable && Self.isAuthorized
+        Self.isAuthorized && SFSpeechRecognizer(locale: locale)?.supportsOnDeviceRecognition == true
     }
 
-    func startSession() {
-        audioQueue.sync { startOnQueue() }
-    }
-
-    private func startOnQueue() {
+    @discardableResult
+    func start() -> Bool {
         guard isAvailable else {
-            diag("本机识别启动失败：Speech 不可用或未授权")
-            pipeline.broadcastText("", isFinal: true)
-            return
+            vlog("[apple] 本机识别不可用（授权或语言包缺失）")
+            return false
         }
-        task?.cancel()
-        generation = UUID()
-        let currentGeneration = generation
+        cancel()
+        let recognizer = SFSpeechRecognizer(locale: locale)
+        self.recognizer = recognizer
+        guard let format = AVAudioFormat(commonFormat: .pcmFormatInt16,
+                                         sampleRate: Self.deviceSampleRate,
+                                         channels: 1,
+                                         interleaved: true) else { return false }
+        self.format = format
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        request.addsPunctuation = true
-        if recognizer?.supportsOnDeviceRecognition == true {
-            request.requiresOnDeviceRecognition = true
-        }
-        diag("本机识别启动：设备端模式=\(request.requiresOnDeviceRecognition)")
+        request.requiresOnDeviceRecognition = true
+        if #available(macOS 13.0, *) { request.addsPunctuation = true }
         self.request = request
-        decoder.reset()
-        audioFrames = 0
-        audioSamples = 0
+        lastText = ""
+        let current = UUID()
+        generation = current
+        state = .recording
 
         task = recognizer?.recognitionTask(with: request) { [weak self] result, error in
-            guard let self else { return }
-            self.audioQueue.async {
-                guard self.generation == currentGeneration else { return }
-                if let result {
-                    self.pipeline.broadcastText(result.bestTranscription.formattedString, isFinal: result.isFinal)
+            guard let self, self.generation == current else { return }
+            if let result {
+                let text = result.bestTranscription.formattedString
+                if !text.isEmpty {
+                    self.lastText = text
+                    self.onText?(text, false)
                 }
-                if error != nil || (result?.isFinal ?? false) {
-                    if let error, result?.isFinal != true {
-                        diag("本机识别错误：\(error.localizedDescription)")
-                        self.pipeline.broadcastText("", isFinal: true)
-                    }
-                    self.request = nil
-                    self.task = nil
+                if result.isFinal {
+                    self.state = .idle
+                    self.onText?(text.isEmpty ? self.lastText : text, true)
                 }
+            } else if error != nil {
+                // A recognition error during dictation keeps whatever was already produced;
+                // the core decides whether to show partial text or an empty result.
+                self.state = .idle
+                self.onText?(self.lastText, true)
             }
         }
+        vlog("[apple] 本机识别已启动")
+        return true
     }
 
-    /// USB 设备音频帧入口（Coordinator 从 USBDeviceManager 转发过来）。
-    /// 帧格式：设备 Opus 载荷解码后注入。
-    private let audioQueue = DispatchQueue(label: "vibeboardplus.speech.audio")
-
-    func sendAudio(_ data: Data) {
-        audioQueue.async { [weak self] in
-            guard let self, let request = self.request else { return }
-            let buffers = self.decoder.decode(data)
-            self.audioFrames += 1
-            for buffer in buffers {
-                self.audioSamples += Int(buffer.frameLength)
-                request.append(buffer)
-            }
-            if self.audioFrames == 1 || self.audioFrames % 50 == 0 {
-                diag("本机音频解码：\(self.audioFrames) 帧，\(self.audioSamples) 采样")
+    /// Appends decoded device audio (16 kHz mono PCM16, little endian).
+    func append(pcm: Data) {
+        guard state == .recording, let request, let format else { return }
+        let frames = pcm.count / 2
+        guard frames > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)) else { return }
+        buffer.frameLength = AVAudioFrameCount(frames)
+        pcm.withUnsafeBytes { raw in
+            if let destination = buffer.int16ChannelData?[0], let source = raw.bindMemory(to: Int16.self).baseAddress {
+                destination.update(from: source, count: frames)
             }
         }
+        request.append(buffer)
     }
 
-    func finishSession() {
-        audioQueue.async { [self] in
-            diag("本机音频输入结束：\(audioFrames) 帧，\(audioSamples) 采样")
-            request?.endAudio()
-            request = nil
-        }
+    /// Ends the audio stream; the recognition task delivers the final transcript.
+    func finish() {
+        guard state == .recording else { return }
+        state = .finishing
+        request?.endAudio()
+        vlog("[apple] 音频结束，等待最终结果")
     }
 
-    func stop() {
-        audioQueue.async { [self] in
-            generation = UUID()
-            task?.cancel()
-            task = nil
-            request = nil
-        }
+    func cancel() {
+        generation = UUID()
+        task?.cancel()
+        task = nil
+        request?.endAudio()
+        request = nil
+        recognizer = nil
+        state = .idle
+        lastText = ""
     }
 
-    func speechRecognizer(_ speechRecognizer: SFSpeechRecognizer, availabilityDidChange available: Bool) {
-        if !available { diag("本机识别服务已不可用") }
-    }
-}
-
-/// 设备音频帧的 Opus 载荷解码为 16 kHz 单声道 PCM。
-final class DeviceAudioDecoder {
-    private var opusDecoder: OpusDecoder?
-
+    /// Session teardown after a final transcript was delivered.
     func reset() {
-        opusDecoder?.reset()
-    }
-
-    func decode(_ frame: Data) -> [AVAudioPCMBuffer] {
-        guard !frame.isEmpty else { return [] }
-        if opusDecoder == nil {
-            opusDecoder = OpusDecoder(sampleRate: AppleSpeechProvider.deviceSampleRate,
-                                      channels: AppleSpeechProvider.deviceChannels)
-        }
-        return [opusDecoder?.decode(frame)].compactMap { $0 }
-    }
-}
-
-/// Opus 解码（alta/swift-opus，libopus）：设备音频帧 → PCM buffer → 苹果本机识别
-final class OpusDecoder {
-    private let decoder: Opus.Decoder?
-    private var failures = 0
-
-    init(sampleRate: Double, channels: AVAudioChannelCount) {
-        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channels)
-        decoder = format.flatMap { try? Opus.Decoder(format: $0) }
-        if decoder == nil { diag("设备音频解码器初始化失败") }
-    }
-
-    func reset() {
-        failures = 0
-        do { try decoder?.reset() }
-        catch { diag("设备 Opus 解码器重置失败：\(error.localizedDescription)") }
-    }
-
-    func decode(_ frame: Data) -> AVAudioPCMBuffer? {
-        guard let decoder else { return nil }
-        do {
-            return try decoder.decode(frame)
-        } catch {
-            failures += 1
-            if failures == 1 || failures % 50 == 0 {
-                diag("设备 Opus 解码失败：\(failures) 帧，\(error.localizedDescription)")
-            }
-            return nil
-        }
+        task = nil
+        request = nil
+        recognizer = nil
+        format = nil
+        state = .idle
+        lastText = ""
     }
 }

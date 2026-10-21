@@ -131,6 +131,7 @@ struct Provisioned {
 enum Control {
     Cancel,
     UpdateConfig(Box<SessionConfig>),
+    ExternalText { text: String, is_final: bool },
     Shutdown,
 }
 
@@ -209,6 +210,11 @@ impl App {
 
     pub fn update_session_config(&self, config: SessionConfig) {
         let _ = self.control.send(Control::UpdateConfig(Box::new(config)));
+    }
+
+    /// Delivers a transcript from the shell's own recogniser.
+    pub fn external_text(&self, text: String, is_final: bool) {
+        let _ = self.control.send(Control::ExternalText { text, is_final });
     }
 
     pub fn stop(&mut self) {
@@ -301,6 +307,10 @@ impl AppWorker {
                     Ok(Control::UpdateConfig(config)) => {
                         self.config.session = *config.clone();
                         self.session.update_config(*config);
+                    }
+                    Ok(Control::ExternalText { text, is_final }) => {
+                        self.session
+                            .send(SessionMessage::ExternalText { text, is_final });
                     }
                     Ok(Control::Shutdown) | Err(mpsc::TryRecvError::Disconnected) => {
                         self.shutdown();
