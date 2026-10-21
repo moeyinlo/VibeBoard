@@ -1,5 +1,8 @@
 import Foundation
+// Apple 的本机语言模型只在 macOS 26 SDK 及更高版本中提供；CI 上的 macOS 14 没有它。
+#if canImport(FoundationModels)
 import FoundationModels
+#endif
 
 enum SemanticRewriteError: LocalizedError {
     case unavailable(String)
@@ -18,7 +21,9 @@ enum SemanticRewriter {
         AppSettings().rewriteEngine == "local" ? localIsAvailable : !CloudKey.read(for: .rewrite).isEmpty
     }
     static var localIsAvailable: Bool {
+        #if canImport(FoundationModels)
         if #available(macOS 26.0, *) { return SystemLanguageModel.default.availability == .available }
+        #endif
         return false
     }
     static let instructions = """
@@ -40,6 +45,7 @@ enum SemanticRewriter {
         guard text.utf16.count <= 4000 else {
             throw SemanticRewriteError.unavailable("文本过长，已保留原文")
         }
+        #if canImport(FoundationModels)
         guard #available(macOS 26.0, *) else {
             throw SemanticRewriteError.unavailable("本机语义整理需要 macOS 26 或更高版本")
         }
@@ -59,6 +65,9 @@ enum SemanticRewriter {
         let response = try await session.respond(to: text, options: GenerationOptions(temperature: 0, maximumResponseTokens: 2048))
         try Task.checkCancellation()
         return try validate(response.content, original: text)
+        #else
+        throw SemanticRewriteError.unavailable("本机语义整理需要 macOS 26 或更高版本")
+        #endif
     }
 
     static func validate(_ result: String, original: String) throws -> String {

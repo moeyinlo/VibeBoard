@@ -40,6 +40,7 @@ jobs:
       - name: Swift tests
         env:
           VIBEBOARD_CORE_LIB_DIR: ${{ github.workspace }}/core/target/release
+          MACOSX_DEPLOYMENT_TARGET: "13.0"
         run: |
           (cd core && cargo build --release -p vibeboard-core --features whisper-metal)
           swift test

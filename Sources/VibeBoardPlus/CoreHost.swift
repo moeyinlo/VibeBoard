@@ -206,7 +206,7 @@ final class CoreHost {
         let rewriteKey = dedicatedRewriteKey.isEmpty ? recognitionKey : dedicatedRewriteKey
         let cloudRewrite = settings.rewrite && settings.rewriteEngine == "cloud"
 
-        var config: [String: Any] = [
+        let config: [String: Any] = [
             "provider": provider,
             "model": settings.asrModel,
             "whisper_model": settings.whisperModel,
