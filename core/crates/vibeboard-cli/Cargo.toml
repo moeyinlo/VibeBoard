@@ -1,0 +1,17 @@
+[package]
+name = "vibeboard-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Headless VibeBoard core harness: device link, auth and (later) transcription smoke tests"
+
+[[bin]]
+name = "vibeboard"
+path = "src/main.rs"
+
+[dependencies]
+vibeboard-core = { path = "../vibeboard-core" }
+log = "0.4"
+env_logger = "0.11"
+serde_json = "1"

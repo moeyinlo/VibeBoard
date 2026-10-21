@@ -33,3 +33,10 @@ Pods/
 dist/
 
 .vscode/
+# Rust (shared core)
+core/target/
+
+# C# / WPF shell
+Windows/bin/
+Windows/obj/
+*.user
