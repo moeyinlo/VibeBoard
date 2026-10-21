@@ -37,8 +37,10 @@ core/
 - [x] 按键状态机、会话编排、超时与取消、外部识别通道（P1）
 - [x] App 层：发现循环、注册、断线后重连、外部凭据注入（P1）
 - [x] 本地 Whisper（离线、模型应用内下载、Metal/CUDA/Vulkan 编译开关、性能统计）
-- [ ] C ABI（P2）
-- [ ] macOS / Windows 壳接线（P3 / P4）
+- [x] C ABI + 头文件 + C 冒烟测试（macOS 静态库 / Windows DLL）（P2）
+- [x] macOS 壳切到内核：C target + CoreHost + Apple 语音回传（P3）
+- [x] Windows 壳（WPF）通过 P/Invoke 使用内核（P4）
+- [ ] Relay（暂不做，见 `docs/PROTOCOL.md`）
 
 ## CLI
 
@@ -107,6 +109,26 @@ macOS 实测（M4、`small`、8 线程）：
 短音频下 GPU 的固定开销占主导，内存收益更明显；长音频才是 GPU 的主场。
 正常说话的中文识别质量良好（示例：「今天下午三点开会，记得带上项目文档和笔记本。」→
 输出仅一处同音字差异）；唱歌场景受模型训练分布限制，`base`/`small` 都会明显退化。
+
+## 壳如何接内核
+
+| 平台 | 链接方式 | 壳侧保留 |
+|---|---|---|
+| macOS | `libvibeboard_core.a` 静态链接进可执行文件（SwiftPM C target） | 菜单栏、悬浮窗、AX 文本注入、Keychain、Apple 语音识别 |
+| Windows | `vibeboard_core.dll` + P/Invoke | 托盘、悬浮窗、SendInput、DPAPI、Windows 语音识别 |
+
+C ABI 见 `crates/vibeboard-core/include/vibeboard_core.h`，Swift 侧封装在
+`Sources/VibeBoardPlus/CoreHost.swift`，C# 侧在 `Windows/Core/NativeCore.cs`。
+
+约定：回调都在内核工作线程触发，壳负责拷贝字符串并切回 UI 线程；凭据由壳存储并通过
+`load_secret` / `save_secret` 回调注入。
+
+macOS 打包：
+
+```sh
+bash scripts/package_app.sh     # 无证书时 ad-hoc 签名，CI 用
+bash scripts/build_app.sh       # 本机开发，使用钥匙串里的 Apple Development 证书
+```
 
 ## 构建产物
 

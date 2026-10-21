@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>VibeBoardPlus</AssemblyName>
+    <RootNamespace>VibeBoardPlus</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Allows building/publishing the Windows app from macOS/Linux CI as well. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <SatelliteResourceLanguages>en;zh-Hans</SatelliteResourceLanguages>
+    <Version>0.2.0</Version>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- WinForms (tray icon) wants DPI configured here rather than in the manifest. -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- Built by CI from core/crates/vibeboard-core (release profile). -->
+    <VibeBoardCoreDir Condition="'$(VibeBoardCoreDir)' == ''">$(MSBuildThisFileDirectory)..\core\target\release\</VibeBoardCoreDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(VibeBoardCoreDir)vibeboard_core.dll"
+          Condition="Exists('$(VibeBoardCoreDir)vibeboard_core.dll')"
+          Link="vibeboard_core.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Concentus" Version="2.2.2" />
+    <PackageReference Include="System.IO.Ports" Version="8.0.0" />
+    <PackageReference Include="System.Management" Version="8.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <PackageReference Include="System.Speech" Version="8.0.0" />
+    <PackageReference Include="Whisper.net" Version="1.9.1" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
+  </ItemGroup>
+
+</Project>

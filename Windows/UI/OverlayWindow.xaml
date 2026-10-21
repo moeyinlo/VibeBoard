@@ -1,0 +1,35 @@
+<Window x:Class="VibeBoardPlus.UI.OverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="VibeBoard Plus"
+        Width="480" SizeToContent="Height"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ShowActivated="False"
+        ResizeMode="NoResize" Focusable="False"
+        WindowStartupLocation="Manual">
+    <Border CornerRadius="10" Background="#F21B1B1E" BorderBrush="#33FFFFFF" BorderThickness="1"
+            Padding="18,12" Margin="8">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="18" ShadowDepth="2" Opacity="0.45" Color="Black" />
+        </Border.Effect>
+        <StackPanel>
+            <Grid>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="StatusText" Text="正在聆听" Foreground="#B8FFFFFF"
+                               FontSize="12" FontWeight="Medium" VerticalAlignment="Center" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="CopyButton" Content="复制" Click="OnCopy" Padding="8,2" Margin="0,0,6,0"
+                            Background="#22FFFFFF" Foreground="#E8FFFFFF" BorderThickness="0" FontSize="11"
+                            Cursor="Hand" />
+                    <Button Content="✕" Click="OnClose" Padding="8,2"
+                            Background="#22FFFFFF" Foreground="#E8FFFFFF" BorderThickness="0" FontSize="11"
+                            Cursor="Hand" />
+                </StackPanel>
+            </Grid>
+            <TextBlock x:Name="TranscriptText" Text="" TextWrapping="Wrap" Margin="0,10,0,2"
+                       Foreground="#F5FFFFFF" FontSize="19" FontWeight="Medium" LineHeight="28"
+                       MaxHeight="220" />
+        </StackPanel>
+    </Border>
+</Window>

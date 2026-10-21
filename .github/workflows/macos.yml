@@ -1,0 +1,56 @@
+name: macos
+
+on:
+  push:
+    paths:
+      - "Sources/**"
+      - "Tests/**"
+      - "Package.swift"
+      - "scripts/**"
+      - "core/**"
+      - ".github/workflows/macos.yml"
+  pull_request:
+    paths:
+      - "Sources/**"
+      - "Tests/**"
+      - "Package.swift"
+      - "core/**"
+  workflow_dispatch:
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build macOS app
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install libopus build dependencies
+        run: brew install autoconf automake libtool
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+
+      - name: Swift tests
+        env:
+          VIBEBOARD_CORE_LIB_DIR: ${{ github.workspace }}/core/target/release
+        run: |
+          (cd core && cargo build --release -p vibeboard-core --features whisper-metal)
+          swift test
+
+      - name: Package app bundle
+        env:
+          WHISPER_FEATURES: whisper-metal
+        run: bash scripts/package_app.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VibeBoardPlus-macos
+          path: dist/VibeBoardPlus-macos.zip
+          if-no-files-found: error

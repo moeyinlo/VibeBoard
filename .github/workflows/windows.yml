@@ -1,0 +1,67 @@
+name: windows
+
+on:
+  push:
+    paths:
+      - "Windows/**"
+      - "core/**"
+      - ".github/workflows/windows.yml"
+  pull_request:
+    paths:
+      - "Windows/**"
+      - "core/**"
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build Windows shell
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+
+      - name: Build core DLL
+        working-directory: core
+        run: cargo build --release -p vibeboard-core
+
+      - name: Check the DLL is present
+        shell: pwsh
+        run: |
+          $dll = "core/target/release/vibeboard_core.dll"
+          if (-not (Test-Path $dll)) { throw "core DLL missing: $dll" }
+          Get-Item $dll | Format-List Name, Length
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Publish self-contained app
+        working-directory: Windows
+        run: >
+          dotnet publish VibeBoard.Windows.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:EnableWindowsTargeting=true
+          -o ../dist/windows
+
+      - name: Package
+        shell: pwsh
+        run: |
+          if (-not (Test-Path dist/windows/vibeboard_core.dll)) {
+            throw "vibeboard_core.dll was not copied next to the app"
+          }
+          Compress-Archive -Path dist/windows/* -DestinationPath dist/VibeBoardPlus-windows-x64.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VibeBoardPlus-windows-x64
+          path: dist/VibeBoardPlus-windows-x64.zip
+          if-no-files-found: error
