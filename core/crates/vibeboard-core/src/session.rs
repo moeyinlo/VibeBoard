@@ -52,6 +52,8 @@ impl ProviderChoice {
 pub struct SessionConfig {
     pub provider: ProviderChoice,
     pub model: String,
+    /// Local Whisper model name (`base`, `small`, ...) or an explicit path.
+    pub whisper_model: String,
     pub recognition_key: String,
     pub rewrite_enabled: bool,
     pub rewrite_model: String,
@@ -64,6 +66,7 @@ impl Default for SessionConfig {
         Self {
             provider: ProviderChoice::StepFun,
             model: "stepaudio-2.5-asr-stream".into(),
+            whisper_model: "small".into(),
             recognition_key: String::new(),
             rewrite_enabled: false,
             rewrite_model: "step-3.5-flash".into(),
@@ -88,7 +91,7 @@ impl Default for SessionTimings {
         Self {
             tick: Duration::from_millis(20),
             audio_end: Duration::from_millis(1000),
-            final_local: Duration::from_secs(12),
+            final_local: Duration::from_secs(30),
             final_cloud: Duration::from_secs(60),
         }
     }
@@ -109,6 +112,8 @@ pub trait SessionSink: Send + Sync + 'static {
     fn error(&self, message: &str);
     /// A non-recognition button was pressed: copyResult / showResult / paste / undo / enter / escape.
     fn action(&self, _action: &str) {}
+    /// Local recognition diagnostics (backend, RTF, memory); cloud providers do not emit this.
+    fn local_stats(&self, _stats: &crate::asr::LocalStats) {}
     /// External provider path: decoded PCM for the shell's own recogniser.
     fn external_pcm(&self, _pcm: &[u8]) {}
     fn external_pcm_end(&self) {}
@@ -160,6 +165,7 @@ pub enum SessionMessage {
         text: String,
         is_final: bool,
     },
+    ProviderStats(Box<crate::asr::LocalStats>),
     ProviderError(String),
     RewriteDone(String),
     SetConfig(Box<SessionConfig>),
@@ -298,7 +304,19 @@ pub fn default_provider(
             }
         }
         ProviderChoice::Whisper => {
-            Err("本地 Whisper 模型尚未启用（请使用云端识别或系统识别）".into())
+            #[cfg(feature = "whisper")]
+            {
+                let path = crate::models::resolve(&config.whisper_model)
+                    .unwrap_or_else(|| crate::models::path_for(&config.whisper_model));
+                Ok(Some(Box::new(crate::asr::whisper::WhisperAsr::new(
+                    path, sink,
+                ))))
+            }
+            #[cfg(not(feature = "whisper"))]
+            {
+                let _ = sink;
+                Err("此构建未启用本地 Whisper（请用 --features whisper 重新构建）".into())
+            }
         }
         ProviderChoice::External => Ok(None),
     }
@@ -320,6 +338,12 @@ impl AsrSink for ChannelSink {
     fn on_error(&self, message: &str) {
         if let Ok(tx) = self.0.lock() {
             let _ = tx.send(SessionMessage::ProviderError(message.to_string()));
+        }
+    }
+
+    fn on_stats(&self, stats: &crate::asr::LocalStats) {
+        if let Ok(tx) = self.0.lock() {
+            let _ = tx.send(SessionMessage::ProviderStats(Box::new(stats.clone())));
         }
     }
 }
@@ -384,6 +408,10 @@ impl Worker {
             SessionMessage::Cancel => self.cancel_recognition(),
             SessionMessage::ExternalText { text, is_final } => self.provider_text(&text, is_final),
             SessionMessage::ProviderText { text, is_final } => self.provider_text(&text, is_final),
+            SessionMessage::ProviderStats(stats) => {
+                log::info!("本地识别统计：{}", stats.summary());
+                self.sink.local_stats(&stats);
+            }
             SessionMessage::ProviderError(message) => {
                 log::warn!("识别错误：{message}");
                 if self.active || self.awaiting_final {

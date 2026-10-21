@@ -5,6 +5,8 @@
 
 pub mod stepfun_batch;
 pub mod stepfun_stream;
+#[cfg(feature = "whisper")]
+pub mod whisper;
 
 use std::sync::Arc;
 
@@ -13,6 +15,44 @@ pub trait AsrSink: Send + Sync + 'static {
     /// `is_final == false` means a revised partial transcript.
     fn on_text(&self, text: &str, is_final: bool);
     fn on_error(&self, message: &str);
+    /// Local engines report how the transcription was produced (backend, timings, memory).
+    fn on_stats(&self, _stats: &LocalStats) {}
+}
+
+/// Diagnostics for on-device recognition, surfaced by both shells.
+#[derive(Debug, Clone, Default)]
+pub struct LocalStats {
+    /// Active compute backend: `CPU`, `Metal`, `CUDA`, `Vulkan` or `CoreML`.
+    pub backend: String,
+    /// Everything whisper.cpp reports about the runtime (device names, SIMD flags).
+    pub system_info: String,
+    pub model: String,
+    pub model_size_mb: f64,
+    pub audio_seconds: f64,
+    pub duration_seconds: f64,
+    /// `duration / audio`; below 1.0 means faster than real time.
+    pub realtime_factor: f64,
+    pub segments: usize,
+    pub threads: i32,
+    pub peak_rss_mb: Option<f64>,
+}
+
+impl LocalStats {
+    /// One-line summary the shells can put in a status bar.
+    pub fn summary(&self) -> String {
+        format!(
+            "{} · {} · 音频 {:.1}s / 耗时 {:.2}s（RTF {:.2}） · 线程 {} · 峰值内存 {}",
+            self.backend,
+            self.model,
+            self.audio_seconds,
+            self.duration_seconds,
+            self.realtime_factor,
+            self.threads,
+            self.peak_rss_mb
+                .map(|mb| format!("{mb:.0} MB"))
+                .unwrap_or_else(|| "未知".to_string())
+        )
+    }
 }
 
 pub trait AsrProvider: Send {

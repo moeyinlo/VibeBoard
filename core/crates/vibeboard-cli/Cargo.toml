@@ -10,6 +10,13 @@ description = "Headless VibeBoard core harness: device link, auth and (later) tr
 name = "vibeboard"
 path = "src/main.rs"
 
+[features]
+default = ["whisper"]
+whisper = ["vibeboard-core/whisper"]
+whisper-metal = ["whisper", "vibeboard-core/whisper-metal"]
+whisper-cuda = ["whisper", "vibeboard-core/whisper-cuda"]
+whisper-vulkan = ["whisper", "vibeboard-core/whisper-vulkan"]
+
 [dependencies]
 vibeboard-core = { path = "../vibeboard-core" }
 log = "0.4"

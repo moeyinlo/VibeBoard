@@ -11,9 +11,14 @@ name = "vibeboard_core"
 crate-type = ["rlib", "staticlib", "cdylib"]
 
 [features]
-default = []
-# Local offline recognition; brings in whisper-rs and a native runtime.
+# Local offline recognition is on by default; disable with --no-default-features.
+default = ["whisper"]
 whisper = ["dep:whisper-rs"]
+# Hardware acceleration backends (opt-in: they need the matching toolchain/SDK).
+whisper-metal = ["whisper", "whisper-rs/metal"]
+whisper-cuda = ["whisper", "whisper-rs/cuda"]
+whisper-vulkan = ["whisper", "whisper-rs/vulkan"]
+whisper-coreml = ["whisper", "whisper-rs/coreml"]
 
 [dependencies]
 log = "0.4"
@@ -28,10 +33,13 @@ tungstenite = { version = "0.24", default-features = false, features = ["handsha
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
 audiopus = "0.2"
-whisper-rs = { version = "0.13", optional = true }
+whisper-rs = { version = "0.16", optional = true, features = ["log_backend"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Devices_DeviceAndDriverInstallation"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Devices_DeviceAndDriverInstallation", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
 
 [dev-dependencies]
 env_logger = "0.11"

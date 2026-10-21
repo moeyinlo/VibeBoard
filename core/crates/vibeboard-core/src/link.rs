@@ -43,6 +43,8 @@ pub struct LinkConfig {
     pub device_info_interval: Duration,
     /// Delay between `transport` and `transport_ready`.
     pub transport_ready_delay: Duration,
+    /// How many handshake attempts before the port is considered dead.
+    pub handshake_attempts: u32,
 }
 
 impl LinkConfig {
@@ -54,6 +56,7 @@ impl LinkConfig {
             heartbeat_interval: Duration::from_secs(2),
             device_info_interval: Duration::from_secs(1),
             transport_ready_delay: Duration::from_millis(500),
+            handshake_attempts: 3,
         }
     }
 }
@@ -169,6 +172,7 @@ struct Worker {
     parser: FrameParser,
     device_info_received: bool,
     handshake_generation: u64,
+    handshake_attempts: u32,
     handshake_started: Instant,
     read_buffer: Vec<u8>,
     generations: Arc<AtomicU64>,
@@ -191,6 +195,7 @@ impl Worker {
             parser: FrameParser::new(),
             device_info_received: false,
             handshake_generation: 0,
+            handshake_attempts: 0,
             handshake_started: Instant::now(),
             read_buffer: vec![0; 4096],
             generations: Arc::new(AtomicU64::new(0)),
@@ -252,6 +257,7 @@ impl Worker {
 
     fn start_handshake(&mut self) {
         self.handshake_generation = self.generations.fetch_add(1, Ordering::SeqCst) + 1;
+        self.handshake_attempts += 1;
         self.handshake_started = Instant::now();
         self.device_info_received = false;
         self.parser.reset();
@@ -414,6 +420,7 @@ mod tests {
             heartbeat_interval: Duration::from_millis(5),
             device_info_interval: Duration::from_millis(5),
             transport_ready_delay: Duration::from_millis(10),
+            handshake_attempts: 1,
         }
     }
 

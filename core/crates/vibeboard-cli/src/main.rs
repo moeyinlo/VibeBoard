@@ -34,6 +34,11 @@ fn main() {
     .format_timestamp_millis()
     .init();
 
+    if let Some(model) = &args.download_model {
+        download_model(model);
+        return;
+    }
+
     if let Some(path) = &args.replay {
         replay(path);
         return;
@@ -59,6 +64,14 @@ fn run_app(args: &Args) -> i32 {
         .unwrap_or_default();
     let provider = ProviderChoice::parse(&args.provider).unwrap_or(ProviderChoice::StepFun);
 
+    if provider == ProviderChoice::Whisper
+        && vibeboard_core::models::resolve(&args.whisper_model).is_none()
+    {
+        let path = vibeboard_core::models::path_for(&args.whisper_model);
+        eprintln!("本地模型不存在：{}", path.display());
+        eprintln!("先下载：vibeboard --download-model {}", args.whisper_model);
+        return 1;
+    }
     if provider == ProviderChoice::StepFun && key.trim().is_empty() {
         eprintln!("缺少 StepFun API Key：请传 --asr-key 或设置 STEPFUN_API_KEY。");
         eprintln!("（只想验证串口协议可加 --probe）");
@@ -73,6 +86,7 @@ fn run_app(args: &Args) -> i32 {
         session: SessionConfig {
             provider,
             model: args.model.clone(),
+            whisper_model: args.whisper_model.clone(),
             recognition_key: key,
             rewrite_enabled: args.rewrite,
             rewrite_model: args.rewrite_model.clone(),
@@ -84,7 +98,32 @@ fn run_app(args: &Args) -> i32 {
         scan_interval: Duration::from_secs(2),
     };
 
-    println!("启动：provider={} model={}", args.provider, args.model);
+    if provider == ProviderChoice::Whisper {
+        #[cfg(feature = "whisper")]
+        {
+            let info = vibeboard_core::asr::whisper::backend_info();
+            println!(
+                "本地引擎：{}（已编译后端：{:?}）",
+                info.active, info.compiled
+            );
+            if let Some(first) = info
+                .system_info
+                .lines()
+                .find(|line| !line.trim().is_empty())
+            {
+                println!("运行环境：{}", first.trim());
+            }
+        }
+    }
+    println!(
+        "启动：provider={} model={}",
+        args.provider,
+        if provider == ProviderChoice::Whisper {
+            args.whisper_model.as_str()
+        } else {
+            args.model.as_str()
+        }
+    );
 
     let credentials: Arc<dyn Credentials> = Arc::new(MemoryCredentials::default());
     let mut app = App::start(config, sink.clone(), credentials);
@@ -175,6 +214,15 @@ impl SessionSink for AppConsoleSink {
 
     fn external_pcm_end(&self) {
         println!("[external] 本段音频结束（{} 字节）", self.pcm_bytes());
+    }
+
+    fn local_stats(&self, stats: &vibeboard_core::asr::LocalStats) {
+        println!("[local] {}", stats.summary());
+        for line in stats.system_info.lines().take(6) {
+            if !line.trim().is_empty() {
+                println!("[local:env] {}", line.trim());
+            }
+        }
     }
 }
 
@@ -449,6 +497,30 @@ impl LinkSink for ProbeSink {
     }
 }
 
+fn download_model(model: &str) {
+    if model.is_empty() {
+        eprintln!("用法：vibeboard --download-model <tiny|base|small|medium|large-v3-turbo>");
+        std::process::exit(1);
+    }
+    let mut last_percent = 0u32;
+    let result = vibeboard_core::models::ensure(model, |progress| {
+        let percent = progress.fraction().map(|f| (f * 100.0) as u32);
+        if let Some(percent) = percent {
+            if percent >= last_percent + 5 {
+                last_percent = percent;
+                println!("下载 {model}：{percent}%（{:.0} MB）", progress.megabytes());
+            }
+        }
+    });
+    match result {
+        Ok(path) => println!("模型已就绪：{}", path.display()),
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    }
+}
+
 /// Offline parser run: feeds a captured byte stream through the framing layer.
 fn replay(path: &PathBuf) {
     let bytes = match std::fs::read(path) {
@@ -515,6 +587,8 @@ struct Args {
     probe: bool,
     provider: String,
     model: String,
+    whisper_model: String,
+    download_model: Option<String>,
     asr_key: Option<String>,
     rewrite: bool,
     rewrite_model: String,
@@ -536,6 +610,8 @@ impl Args {
             probe: false,
             provider: "stepfun".to_string(),
             model: "stepaudio-2.5-asr-stream".to_string(),
+            whisper_model: "small".to_string(),
+            download_model: None,
             asr_key: None,
             rewrite: false,
             rewrite_model: "step-3.5-flash".to_string(),
@@ -553,6 +629,8 @@ impl Args {
                 "--wait" => args.wait = iter.next().and_then(|v| v.parse().ok()).unwrap_or(20),
                 "--provider" => args.provider = iter.next().unwrap_or(args.provider),
                 "--model" => args.model = iter.next().unwrap_or(args.model),
+                "--whisper-model" => args.whisper_model = iter.next().unwrap_or(args.whisper_model),
+                "--download-model" => args.download_model = Some(iter.next().unwrap_or_default()),
                 "--asr-key" => args.asr_key = iter.next(),
                 "--rewrite" => args.rewrite = true,
                 "--rewrite-model" => args.rewrite_model = iter.next().unwrap_or(args.rewrite_model),
@@ -583,7 +661,9 @@ fn print_help() {
          \n\
          完整链路（默认）:\n\
            --asr-key <key>       StepFun API Key（也可用环境变量 STEPFUN_API_KEY）\n\
-           --provider <name>     stepfun | external | whisper（默认 stepfun）\n\
+           --provider <name>     stepfun | whisper | external（默认 stepfun）\n\
+           --whisper-model <m>   tiny | base | small | medium | large-v3-turbo 或路径（默认 small）\n\
+           --download-model <m>  下载本地模型后退出\n\
            --model <id>          识别模型（默认 stepaudio-2.5-asr-stream）\n\
            --rewrite             开启语义整理（需要 --rewrite-key）\n\
            --rewrite-model <id>  整理模型（默认 step-3.5-flash）\n\

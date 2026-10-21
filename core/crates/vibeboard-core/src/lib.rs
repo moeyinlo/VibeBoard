@@ -8,6 +8,7 @@
 //! - [`link`] serial link: handshake, heartbeat, device_info polling, reconnect
 //! - [`auth`] `/v1/device/register` and `/v1/device/token` (HMAC-SHA256)
 //! - [`opus`] device Opus frame -> 16 kHz mono PCM
+//! - [`models`] local Whisper model locations and downloads
 //! - [`asr`] StepFun streaming/batch recognition (external and Whisper providers next)
 //! - [`session`] button semantics, session lifecycle and output routing
 //! - [`rewrite`] light semantic cleanup through StepFun chat completions
@@ -19,6 +20,7 @@ pub mod auth;
 pub mod button;
 pub mod discovery;
 pub mod link;
+pub mod models;
 pub mod opus;
 pub mod protocol;
 pub mod rewrite;

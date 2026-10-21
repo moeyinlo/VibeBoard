@@ -36,7 +36,7 @@ core/
 - [x] 语义整理（StepFun chat completions，含结果校验）
 - [x] 按键状态机、会话编排、超时与取消、外部识别通道（P1）
 - [x] App 层：发现循环、注册、断线后重连、外部凭据注入（P1）
-- [ ] 本地 Whisper 接入
+- [x] 本地 Whisper（离线、模型应用内下载、Metal/CUDA/Vulkan 编译开关、性能统计）
 - [ ] C ABI（P2）
 - [ ] macOS / Windows 壳接线（P3 / P4）
 
@@ -74,6 +74,39 @@ cargo fmt --all -- --check
 串口链路的测试通过注入一个假的 `LinkIo`（脚本化上行字节 + 记录下行帧）完成，
 不需要硬件：握手顺序、`device_info` 后的 `ui_state ready`、音频/按键事件分发、
 复位横幅触发重放握手、`ui_state`/`provision` 出队都覆盖到了。
+
+## 本地识别与加速
+
+模型不随包分发，按需下载到用户目录（macOS `~/Library/Application Support/VibeBoardPlus/models`，
+Windows `%LOCALAPPDATA%\VibeBoardPlus\models`）。默认走 `hf-mirror.com`，失败再退 `huggingface.co`；
+可用 `VIBEBOARD_MODEL_MIRROR=https://你的镜像` 覆盖（逗号分隔多个）。
+
+```sh
+vibeboard --download-model small          # 465 MB，中文可用
+vibeboard --download-model large-v3-turbo # 1.6 GB，中文最准
+VIBEBOARD_MODEL_MIRROR=https://hf-mirror.com vibeboard --download-model small
+```
+
+加速后端是**编译期**选择（whisper.cpp 不支持运行时切换），默认只编 CPU：
+
+```sh
+cargo build --features whisper-metal    # macOS（Apple GPU，实测 M4）
+cargo build --features whisper-cuda     # Windows/Linux，需要 CUDA Toolkit
+cargo build --features whisper-vulkan   # 跨厂商 GPU
+```
+
+`whisper::backend_info()` 返回当前后端、已编译后端列表和 whisper.cpp 的设备报告；
+每次识别后 `LocalStats` 会带上：后端、模型、音频时长、识别耗时、RTF、线程数、峰值内存。
+macOS 实测（M4、`small`、8 线程）：
+
+| 后端 | 音频 | 耗时 | RTF | 峰值内存 |
+|---|---|---|---|---|
+| CPU | 4.2 s | 1.30 s | 0.31 | 916 MB |
+| Metal | 4.0 s | 1.35 s | 0.34 | 685 MB |
+
+短音频下 GPU 的固定开销占主导，内存收益更明显；长音频才是 GPU 的主场。
+正常说话的中文识别质量良好（示例：「今天下午三点开会，记得带上项目文档和笔记本。」→
+输出仅一处同音字差异）；唱歌场景受模型训练分布限制，`base`/`small` 都会明显退化。
 
 ## 构建产物
 
