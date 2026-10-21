@@ -80,6 +80,9 @@ final class AppSettingsTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = AppSettings(defaults: defaults)
+        // Saving the recognition page must not disturb the rewrite settings, whatever their
+        // current value is (cleanup is on by default now).
+        let rewriteBefore = settings.rewrite
         let controller = SettingsWindow(settings: settings, buttons: ButtonSettings())
         let window = try XCTUnwrap(controller.window)
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
@@ -91,7 +94,7 @@ final class AppSettingsTests: XCTestCase {
         save.performClick(nil)
         XCTAssertEqual(model.stringValue, "unsaved-rewrite-model")
         XCTAssertEqual(settings.rewriteModel, "step-3.5-flash")
-        XCTAssertFalse(settings.rewrite)
+        XCTAssertEqual(settings.rewrite, rewriteBefore)
     }
 
     @MainActor
