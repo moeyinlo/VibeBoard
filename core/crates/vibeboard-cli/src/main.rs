@@ -1,24 +1,30 @@
 //! Headless harness for the shared core.
 //!
+//! Two modes:
+//! - default: full stack (discovery -> link -> auth -> session -> ASR), prints transcripts
+//! - `--probe`: raw protocol/audio inspection without recognition
+//!
 //! Examples:
 //! ```text
-//! vibeboard                       # discover, handshake, register, decode audio for 30 s
-//! vibeboard --seconds 0          # run until Ctrl-C
-//! vibeboard --no-auth            # protocol only
-//! vibeboard --record out.wav     # also store decoded 16 kHz PCM
-//! vibeboard --replay frames.bin  # offline parse of a captured byte stream (CI)
+//! vibeboard --asr-key sk-... ...   # 按设备按键说话，打印识别结果
+//! vibeboard --probe                # 只验证串口协议
+//! vibeboard --provider external --record out.wav   # 录设备音频（不做识别）
+//! vibeboard --replay frames.bin    # 离线解析抓包（CI）
 //! ```
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use vibeboard_core::app::{App, AppConfig, Credentials, MemoryCredentials};
 use vibeboard_core::auth::DeviceAuthClient;
 use vibeboard_core::discovery::{self, DevicePresence};
 use vibeboard_core::link::{LinkConfig, LinkSink, SerialLink};
 use vibeboard_core::opus::OpusPcmDecoder;
 use vibeboard_core::protocol::{AudioFrame, DeviceEvent, DeviceInfo, FrameParser, Incoming};
+use vibeboard_core::session::{ProviderChoice, SessionConfig, SessionSink};
+use vibeboard_core::{DEVICE_PID, DEVICE_VID};
 
 fn main() {
     let args = Args::parse();
@@ -33,13 +39,157 @@ fn main() {
         return;
     }
 
+    let code = if args.probe {
+        run_probe(&args)
+    } else {
+        run_app(&args)
+    };
+    std::process::exit(code);
+}
+
+// ---------------------------------------------------------------------------
+// Full stack
+// ---------------------------------------------------------------------------
+
+fn run_app(args: &Args) -> i32 {
+    let key = args
+        .asr_key
+        .clone()
+        .or_else(|| std::env::var("STEPFUN_API_KEY").ok())
+        .unwrap_or_default();
+    let provider = ProviderChoice::parse(&args.provider).unwrap_or(ProviderChoice::StepFun);
+
+    if provider == ProviderChoice::StepFun && key.trim().is_empty() {
+        eprintln!("缺少 StepFun API Key：请传 --asr-key 或设置 STEPFUN_API_KEY。");
+        eprintln!("（只想验证串口协议可加 --probe）");
+        return 1;
+    }
+    if args.record.is_some() && provider != ProviderChoice::External {
+        eprintln!("提示：--record 只在 --provider external 下录制设备 PCM；当前配置不会写文件。");
+    }
+
+    let sink = Arc::new(AppConsoleSink::default());
+    let config = AppConfig {
+        session: SessionConfig {
+            provider,
+            model: args.model.clone(),
+            recognition_key: key,
+            rewrite_enabled: args.rewrite,
+            rewrite_model: args.rewrite_model.clone(),
+            rewrite_key: args.rewrite_key.clone().unwrap_or_default(),
+            button_actions: Default::default(),
+        },
+        base_url: args.base_url.clone(),
+        registration_token: None,
+        scan_interval: Duration::from_secs(2),
+    };
+
+    println!("启动：provider={} model={}", args.provider, args.model);
+
+    let credentials: Arc<dyn Credentials> = Arc::new(MemoryCredentials::default());
+    let mut app = App::start(config, sink.clone(), credentials);
+
+    let started = Instant::now();
+    loop {
+        if args.seconds > 0 && started.elapsed() >= Duration::from_secs(args.seconds) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    app.stop();
+    if args.provider == "external" {
+        if let Some(path) = &args.record {
+            match sink.write_wav(path) {
+                Ok(bytes) => println!("已写入 {}（{} 字节 PCM）", path.display(), bytes),
+                Err(error) => eprintln!("写入 WAV 失败：{error}"),
+            }
+        }
+    }
+    println!(
+        "退出。共 {} 次识别，输出 {} 帧 PCM",
+        sink.sessions(),
+        sink.pcm_bytes()
+    );
+    0
+}
+
+#[derive(Default)]
+struct AppConsoleSink {
+    pcm: Mutex<Vec<u8>>,
+    sessions: AtomicU64,
+    finals: AtomicU64,
+}
+
+impl AppConsoleSink {
+    fn sessions(&self) -> u64 {
+        self.sessions.load(Ordering::Relaxed)
+    }
+
+    fn pcm_bytes(&self) -> usize {
+        self.pcm.lock().map(|pcm| pcm.len()).unwrap_or(0)
+    }
+
+    fn write_wav(&self, path: &PathBuf) -> std::io::Result<usize> {
+        let pcm = self.pcm.lock().unwrap();
+        let wav = vibeboard_core::asr::wav_from_pcm16(&pcm, 16_000);
+        std::fs::write(path, wav)?;
+        Ok(pcm.len())
+    }
+}
+
+impl SessionSink for AppConsoleSink {
+    fn status(&self, text: &str) {
+        println!("[status] {text}");
+    }
+
+    fn partial_text(&self, text: &str) {
+        println!("[partial] {text}");
+    }
+
+    fn final_text(&self, text: &str) {
+        self.finals.fetch_add(1, Ordering::Relaxed);
+        println!("[final] {text}");
+    }
+
+    fn session_started(&self) {
+        self.sessions.fetch_add(1, Ordering::Relaxed);
+        println!("[session] 开始录音（请对着设备说话，说完松开）");
+    }
+
+    fn cancelled(&self) {
+        println!("[session] 已取消");
+    }
+
+    fn error(&self, message: &str) {
+        eprintln!("[error] {message}");
+    }
+
+    fn action(&self, action: &str) {
+        println!("[action] 按键动作：{action}");
+    }
+
+    fn external_pcm(&self, pcm: &[u8]) {
+        self.pcm.lock().unwrap().extend_from_slice(pcm);
+    }
+
+    fn external_pcm_end(&self) {
+        println!("[external] 本段音频结束（{} 字节）", self.pcm_bytes());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Probe mode: protocol + audio without recognition
+// ---------------------------------------------------------------------------
+
+fn run_probe(args: &Args) -> i32 {
     let presence = match args.port.clone() {
         Some(port) => DevicePresence {
             port_name: port.clone(),
             serial: args.serial.clone().unwrap_or_default(),
             product: None,
-            vendor_id: vibeboard_core::DEVICE_VID,
-            product_id: vibeboard_core::DEVICE_PID,
+            vendor_id: DEVICE_VID,
+            product_id: DEVICE_PID,
         },
         None => match wait_for_device(Duration::from_secs(args.wait)) {
             Some(presence) => presence,
@@ -47,7 +197,7 @@ fn main() {
                 eprintln!(
                     "未发现 VibeBoard 设备（VID 303A / PID 1001）。请确认 USB 已连接后重试。"
                 );
-                std::process::exit(2);
+                return 2;
             }
         },
     };
@@ -57,29 +207,29 @@ fn main() {
         presence.port_name, presence.serial
     );
 
-    let sink = Arc::new(ConsoleSink::default());
+    let sink = Arc::new(ProbeSink::default());
     let config = LinkConfig::new(presence.port_name.clone());
-    let mut link = match SerialLink::open(config, sink.clone()) {
+    let link = match SerialLink::open(config, sink.clone()) {
         Ok(link) => link,
         Err(error) => {
             eprintln!("打开串口失败: {error}");
-            std::process::exit(3);
+            return 3;
         }
     };
 
     let started = Instant::now();
-    let mut auth_state = AuthState::Pending;
+    let mut auth_done = false;
     let mut last_report = Instant::now();
 
     loop {
-        let elapsed = started.elapsed();
-        if args.seconds > 0 && elapsed >= Duration::from_secs(args.seconds) {
+        if args.seconds > 0 && started.elapsed() >= Duration::from_secs(args.seconds) {
             break;
         }
 
-        if args.auth && matches!(auth_state, AuthState::Pending) {
+        if args.auth && !auth_done {
             let info = sink.info.lock().unwrap().clone();
             if let Some(info) = info {
+                auth_done = true;
                 let mac = presence.serial.clone();
                 let hardware = if info.hardware.is_empty() {
                     "vibe_keyboard".to_string()
@@ -114,14 +264,9 @@ fn main() {
                     println!("token OK: {}…", &token[..token.len().min(12)]);
                     Ok(())
                 })();
-                auth_state = match result {
-                    Ok(()) => AuthState::Done,
-                    Err(message) => {
-                        eprintln!("鉴权失败: {message}");
-                        AuthState::Failed
-                    }
-                };
-                sink.record_token_checked(auth_state == AuthState::Done);
+                if let Err(message) = result {
+                    eprintln!("鉴权失败: {message}");
+                }
             }
         }
 
@@ -141,13 +286,7 @@ fn main() {
         }
     }
     println!("退出。\n{}", sink.stats_line(started.elapsed()));
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AuthState {
-    Pending,
-    Done,
-    Failed,
+    0
 }
 
 fn wait_for_device(timeout: Duration) -> Option<DevicePresence> {
@@ -169,7 +308,7 @@ fn wait_for_device(timeout: Duration) -> Option<DevicePresence> {
 }
 
 #[derive(Default)]
-struct ConsoleSink {
+struct ProbeSink {
     decoder: Mutex<Option<OpusPcmDecoder>>,
     pcm: Mutex<Vec<u8>>,
     info: Mutex<Option<DeviceInfo>>,
@@ -177,39 +316,30 @@ struct ConsoleSink {
     audio_bytes: AtomicU64,
     decode_failures: AtomicU64,
     events: AtomicU64,
-    token_ok: AtomicBool,
-    last_audio: Mutex<Option<Instant>>,
 }
 
-impl ConsoleSink {
+impl ProbeSink {
     fn decoder(&self) -> std::sync::MutexGuard<'_, Option<OpusPcmDecoder>> {
         let mut guard = self.decoder.lock().unwrap();
         if guard.is_none() {
             match OpusPcmDecoder::new() {
                 Ok(decoder) => *guard = Some(decoder),
-                Err(error) => {
-                    log::error!("创建 Opus 解码器失败: {error}");
-                }
+                Err(error) => log::error!("创建 Opus 解码器失败: {error}"),
             }
         }
         guard
     }
 
-    fn record_token_checked(&self, ok: bool) {
-        self.token_ok.store(ok, Ordering::Relaxed);
-    }
-
     fn stats_line(&self, elapsed: Duration) -> String {
         let frames = self.audio_frames.load(Ordering::Relaxed);
         let bytes = self.audio_bytes.load(Ordering::Relaxed);
-        let samples = bytes / 2;
         let seconds = elapsed.as_secs_f64().max(0.001);
         format!(
-            "[stats] {:.0}s 音频帧={} PCM={} 采样(合计)={} 解码失败={} 事件={} 吞吐={:.1} KB/s",
+            "[stats] {:.0}s 音频帧={} PCM={} 采样={} 解码失败={} 事件={} 吞吐={:.1} KB/s",
             elapsed.as_secs_f64(),
             frames,
             bytes,
-            samples,
+            bytes / 2,
             self.decode_failures.load(Ordering::Relaxed),
             self.events.load(Ordering::Relaxed),
             bytes as f64 / 1024.0 / seconds
@@ -218,29 +348,12 @@ impl ConsoleSink {
 
     fn write_wav(&self, path: &PathBuf) -> std::io::Result<usize> {
         let pcm = self.pcm.lock().unwrap();
-        let mut file = std::fs::File::create(path)?;
-        let data_len = pcm.len() as u32;
-        let mut header = Vec::with_capacity(44);
-        header.extend_from_slice(b"RIFF");
-        header.extend_from_slice(&(36 + data_len).to_le_bytes());
-        header.extend_from_slice(b"WAVEfmt ");
-        header.extend_from_slice(&16u32.to_le_bytes());
-        header.extend_from_slice(&1u16.to_le_bytes());
-        header.extend_from_slice(&1u16.to_le_bytes());
-        header.extend_from_slice(&16_000u32.to_le_bytes());
-        header.extend_from_slice(&32_000u32.to_le_bytes());
-        header.extend_from_slice(&2u16.to_le_bytes());
-        header.extend_from_slice(&16u16.to_le_bytes());
-        header.extend_from_slice(b"data");
-        header.extend_from_slice(&data_len.to_le_bytes());
-        use std::io::Write;
-        file.write_all(&header)?;
-        file.write_all(&pcm)?;
+        std::fs::write(path, vibeboard_core::asr::wav_from_pcm16(&pcm, 16_000))?;
         Ok(pcm.len())
     }
 }
 
-impl LinkSink for ConsoleSink {
+impl LinkSink for ProbeSink {
     fn on_audio(&self, frame: AudioFrame) {
         let count = self.audio_frames.fetch_add(1, Ordering::Relaxed) + 1;
         let mut decoder = self.decoder();
@@ -270,7 +383,6 @@ impl LinkSink for ConsoleSink {
                 frame.is_last()
             );
         }
-        *self.last_audio.lock().unwrap() = Some(Instant::now());
     }
 
     fn on_event(&self, event: DeviceEvent, raw: &serde_json::Value) {
@@ -306,9 +418,7 @@ impl LinkSink for ConsoleSink {
             DeviceEvent::ProvisionAck { ok, message } => {
                 println!("[device] provision_ack ok={ok} message={message:?}");
             }
-            DeviceEvent::Other(_) => {
-                println!("[device] {raw}");
-            }
+            DeviceEvent::Other(_) => println!("[device] {raw}"),
         }
     }
 
@@ -364,17 +474,16 @@ fn replay(path: &PathBuf) {
                     decoder = OpusPcmDecoder::new().ok();
                 }
                 if let Some(decoder) = decoder.as_mut() {
-                    if let Ok(samples_now) = decoder.decode(&frame.payload) {
-                        samples += samples_now.len();
+                    if let Ok(chunk) = decoder.decode(&frame.payload) {
+                        samples += chunk.len();
                     }
                 }
             }
             Incoming::State(value) => {
                 events += 1;
-                if let Some(event) = DeviceEvent::parse(&value) {
-                    println!("{event:?}");
-                } else {
-                    println!("{value}");
+                match DeviceEvent::parse(&value) {
+                    Some(event) => println!("{event:?}"),
+                    None => println!("{value}"),
                 }
             }
             Incoming::Raw(bytes) => {
@@ -403,6 +512,13 @@ struct Args {
     replay: Option<PathBuf>,
     wait: u64,
     verbose: bool,
+    probe: bool,
+    provider: String,
+    model: String,
+    asr_key: Option<String>,
+    rewrite: bool,
+    rewrite_model: String,
+    rewrite_key: Option<String>,
 }
 
 impl Args {
@@ -410,27 +526,39 @@ impl Args {
         let mut args = Args {
             port: None,
             serial: None,
-            seconds: 30,
+            seconds: 0,
             auth: true,
             base_url: "https://torchfun.com".to_string(),
             record: None,
             replay: None,
             wait: 20,
             verbose: false,
+            probe: false,
+            provider: "stepfun".to_string(),
+            model: "stepaudio-2.5-asr-stream".to_string(),
+            asr_key: None,
+            rewrite: false,
+            rewrite_model: "step-3.5-flash".to_string(),
+            rewrite_key: None,
         };
         let mut iter = std::env::args().skip(1);
         while let Some(arg) = iter.next() {
             match arg.as_str() {
                 "--port" => args.port = iter.next(),
                 "--serial" => args.serial = iter.next(),
-                "--seconds" => {
-                    args.seconds = iter.next().and_then(|v| v.parse().ok()).unwrap_or(30)
-                }
+                "--seconds" => args.seconds = iter.next().and_then(|v| v.parse().ok()).unwrap_or(0),
                 "--base-url" => args.base_url = iter.next().unwrap_or(args.base_url),
                 "--record" => args.record = iter.next().map(PathBuf::from),
                 "--replay" => args.replay = iter.next().map(PathBuf::from),
                 "--wait" => args.wait = iter.next().and_then(|v| v.parse().ok()).unwrap_or(20),
+                "--provider" => args.provider = iter.next().unwrap_or(args.provider),
+                "--model" => args.model = iter.next().unwrap_or(args.model),
+                "--asr-key" => args.asr_key = iter.next(),
+                "--rewrite" => args.rewrite = true,
+                "--rewrite-model" => args.rewrite_model = iter.next().unwrap_or(args.rewrite_model),
+                "--rewrite-key" => args.rewrite_key = iter.next(),
                 "--no-auth" => args.auth = false,
+                "--probe" => args.probe = true,
                 "--verbose" | "-v" => args.verbose = true,
                 "--help" | "-h" => {
                     print_help();
@@ -453,19 +581,24 @@ fn print_help() {
          \n\
          用法: vibeboard [选项]\n\
          \n\
-           --port <path>      指定串口（默认自动发现 303A:1001）\n\
-           --serial <mac>     指定注册用序列号（配合 --port）\n\
-           --seconds <n>      运行时长，0 = 无限（默认 30）\n\
-           --wait <n>         等待设备接入秒数（默认 20）\n\
-           --no-auth          跳过注册与 token 交换\n\
-           --base-url <url>   鉴权服务器，默认 https://torchfun.com\n\
-           --record <file>    把解码后的 PCM 写成 16 kHz 单声道 WAV\n\
-           --replay <file>    回放抓包字节流（离线/CI 用），不连接硬件\n\
-           --verbose          打印 debug 日志\n"
+         完整链路（默认）:\n\
+           --asr-key <key>       StepFun API Key（也可用环境变量 STEPFUN_API_KEY）\n\
+           --provider <name>     stepfun | external | whisper（默认 stepfun）\n\
+           --model <id>          识别模型（默认 stepaudio-2.5-asr-stream）\n\
+           --rewrite             开启语义整理（需要 --rewrite-key）\n\
+           --rewrite-model <id>  整理模型（默认 step-3.5-flash）\n\
+           --rewrite-key <key>   整理用 StepFun Key\n\
+           --record <file>       仅 external 模式：把设备音频写成 WAV\n\
+           --seconds <n>         运行时长，0 = 无限（默认）\n\
+           --base-url <url>      鉴权服务器（默认 https://torchfun.com）\n\
+         \n\
+         协议自检:\n\
+           --probe               只跑串口协议/音频统计，不做识别\n\
+           --no-auth             配合 --probe 跳过注册\n\
+           --port <path>         指定串口\n\
+           --serial <mac>        指定注册序列号\n\
+           --wait <n>            等待设备接入秒数（默认 20）\n\
+           --replay <file>       离线回放抓包字节流\n\
+           --verbose             打印 debug 日志\n"
     );
-}
-
-#[allow(dead_code)]
-fn probe_tcp(url: &str) -> bool {
-    std::net::TcpStream::connect(url).is_ok()
 }

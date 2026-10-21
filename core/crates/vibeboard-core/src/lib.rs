@@ -8,14 +8,21 @@
 //! - [`link`] serial link: handshake, heartbeat, device_info polling, reconnect
 //! - [`auth`] `/v1/device/register` and `/v1/device/token` (HMAC-SHA256)
 //! - [`opus`] device Opus frame -> 16 kHz mono PCM
-//!
-//! The orchestration/ASR layers land in the next milestone.
+//! - [`asr`] StepFun streaming/batch recognition (external and Whisper providers next)
+//! - [`session`] button semantics, session lifecycle and output routing
+//! - [`rewrite`] light semantic cleanup through StepFun chat completions
+//! - [`app`] discovery loop, provisioning and wiring into the session machine
 
+pub mod app;
+pub mod asr;
 pub mod auth;
+pub mod button;
 pub mod discovery;
 pub mod link;
 pub mod opus;
 pub mod protocol;
+pub mod rewrite;
+pub mod session;
 
 /// Device USB identity used by the firmware (ESP32 USB-JTAG/serial).
 pub const DEVICE_VID: u16 = 0x303A;

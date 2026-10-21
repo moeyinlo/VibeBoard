@@ -32,7 +32,11 @@ core/
 - [x] 设备注册 / token 交换（HMAC-SHA256，签名与 macOS 端自检值逐字节一致）
 - [x] Opus → 16 kHz 单声道 PCM 解码
 - [x] CLI 联调工具与离线回放
-- [ ] ASR（StepFun 流式/非流式）、会话编排、Whisper（P1）
+- [x] StepFun 流式（WebSocket）/ 非流式（multipart）识别
+- [x] 语义整理（StepFun chat completions，含结果校验）
+- [x] 按键状态机、会话编排、超时与取消、外部识别通道（P1）
+- [x] App 层：发现循环、注册、断线后重连、外部凭据注入（P1）
+- [ ] 本地 Whisper 接入
 - [ ] C ABI（P2）
 - [ ] macOS / Windows 壳接线（P3 / P4）
 
@@ -41,19 +45,21 @@ core/
 ```sh
 cd core
 
-# 自动发现设备 → 握手 → 注册 → 换 token → 收音频并统计（默认 30 秒）
-cargo run -p vibeboard-cli
+# 完整链路：发现 → 握手 → 注册 → 按键录音 → StepFun 识别 → 打印文本
+STEPFUN_API_KEY=sk-... cargo run -p vibeboard-cli
 
-# 只验证串口协议，不做鉴权
-cargo run -p vibeboard-cli -- --no-auth
+# 只验证串口协议与音频统计（不联网）
+cargo run -p vibeboard-cli -- --probe --no-auth
 
-# 录一段解码后的 16 kHz 单声道 WAV
-cargo run -p vibeboard-cli -- --record /tmp/vibeboard.wav
+# 用壳侧识别（Apple Speech / System.Speech）并录一段 WAV
+cargo run -p vibeboard-cli -- --provider external --record /tmp/vibeboard.wav
+
+# 开启语义整理
+cargo run -p vibeboard-cli -- --asr-key sk-... --rewrite --rewrite-key sk-...
 
 # 离线解析抓包（CI 用，不连硬件）
 cargo run -p vibeboard-cli -- --replay frames.bin
 
-# 全量参数
 cargo run -p vibeboard-cli -- --help
 ```
 
@@ -78,5 +84,6 @@ GitHub Actions 在三个平台跑 `fmt + clippy + test`，并在
 
 - 内核不依赖任何 UI 框架，也不做线程调度决策：回调在链路/网络工作线程上触发，
   壳负责切回主线程并拷贝字符串。
-- 内核不做凭据持久化：密钥由壳从 Keychain / DPAPI 取出后注入。
+- 内核不做凭据持久化：密钥由壳从 Keychain / DPAPI 取出后注入（`Credentials` 接口）。
+- 会话状态机是单线程的：设备事件、识别结果与定时器走同一个队列，避免并发竞态。
 - 串口发现要 MAC 形态的序列号：注册用的 `mac` 就是它，换平台必须保持一致。

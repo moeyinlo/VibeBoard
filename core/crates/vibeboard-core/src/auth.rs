@@ -216,39 +216,8 @@ impl DeviceAuthClient {
     }
 }
 
-/// RFC 4122 v4 UUID, avoiding an extra crate for a single call site.
 fn uuid_v4() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let counter = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let mut seed = [0u8; 32];
-    seed[..16].copy_from_slice(&now.as_nanos().to_le_bytes());
-    seed[16..24].copy_from_slice(&(std::process::id() as u64).to_le_bytes());
-    seed[24..].copy_from_slice(&counter.to_le_bytes());
-    // Mix the seed so sequential calls never share a prefix.
-    let digest = {
-        use sha2::Digest;
-        let mut hasher = Sha256::new();
-        hasher.update(seed);
-        hasher.finalize()
-    };
-    let mut bytes = [0u8; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
-    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10
-    let hex = hex::encode(bytes);
-    format!(
-        "{}-{}-{}-{}-{}",
-        &hex[0..8],
-        &hex[8..12],
-        &hex[12..16],
-        &hex[16..20],
-        &hex[20..32]
-    )
-    .to_uppercase()
+    uuid::Uuid::new_v4().to_string().to_uppercase()
 }
 
 #[cfg(test)]

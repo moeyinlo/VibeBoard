@@ -83,7 +83,7 @@ impl LinkIo for SerialIo {
 pub struct SerialLink {
     tx: Sender<Vec<u8>>,
     stop: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
+    thread: std::sync::Mutex<Option<JoinHandle<()>>>,
 }
 
 impl SerialLink {
@@ -112,7 +112,7 @@ impl SerialLink {
         Self {
             tx,
             stop,
-            thread: Some(thread),
+            thread: std::sync::Mutex::new(Some(thread)),
         }
     }
 
@@ -134,18 +134,21 @@ impl SerialLink {
     }
 
     pub fn is_running(&self) -> bool {
-        !self.stop.load(Ordering::Relaxed)
-            && self
-                .thread
-                .as_ref()
-                .map(|t| !t.is_finished())
-                .unwrap_or(false)
+        if self.stop.load(Ordering::Relaxed) {
+            return false;
+        }
+        self.thread
+            .lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().map(|thread| !thread.is_finished()))
+            .unwrap_or(false)
     }
 
-    /// Stops the worker and waits for it to release the port.
-    pub fn close(&mut self) {
+    /// Stops the worker and waits for it to release the port. Safe from any thread.
+    pub fn close(&self) {
         self.stop.store(true, Ordering::SeqCst);
-        if let Some(thread) = self.thread.take() {
+        let thread = self.thread.lock().ok().and_then(|mut guard| guard.take());
+        if let Some(thread) = thread {
             let _ = thread.join();
         }
     }
@@ -449,7 +452,7 @@ mod tests {
         let io = FakeIo::default();
         let writes = Arc::clone(&io.writes);
         let sink = Arc::new(RecordingSink::default());
-        let mut link = SerialLink::spawn(Box::new(io), fast_config(), sink);
+        let link = SerialLink::spawn(Box::new(io), fast_config(), sink);
 
         assert!(wait_until(|| writes.lock().unwrap().len() >= 2));
         let frames = writes.lock().unwrap().clone();
@@ -478,7 +481,7 @@ mod tests {
         let writes = Arc::clone(&io.writes);
         let sink = Arc::new(RecordingSink::default());
         let sink_dyn: Arc<dyn LinkSink> = sink.clone();
-        let mut link = SerialLink::spawn(Box::new(io), fast_config(), sink_dyn);
+        let link = SerialLink::spawn(Box::new(io), fast_config(), sink_dyn);
 
         assert!(wait_until(|| *sink.ready.lock().unwrap() == 1));
         assert!(writes
@@ -502,7 +505,7 @@ mod tests {
         }
         let sink = Arc::new(RecordingSink::default());
         let sink_dyn: Arc<dyn LinkSink> = sink.clone();
-        let mut link = SerialLink::spawn(Box::new(io), fast_config(), sink_dyn);
+        let link = SerialLink::spawn(Box::new(io), fast_config(), sink_dyn);
 
         assert!(wait_until(|| !sink.audio.lock().unwrap().is_empty()));
         let frame = sink.audio.lock().unwrap()[0].clone();
@@ -523,7 +526,7 @@ mod tests {
             .extend(b"Rebooting...\n".iter().copied());
         let writes = Arc::clone(&io.writes);
         let sink = Arc::new(RecordingSink::default());
-        let mut link = SerialLink::spawn(Box::new(io), fast_config(), sink);
+        let link = SerialLink::spawn(Box::new(io), fast_config(), sink);
 
         assert!(wait_until(|| writes
             .lock()
@@ -540,7 +543,7 @@ mod tests {
         let io = FakeIo::default();
         let writes = Arc::clone(&io.writes);
         let sink = Arc::new(RecordingSink::default());
-        let mut link = SerialLink::spawn(Box::new(io), fast_config(), sink);
+        let link = SerialLink::spawn(Box::new(io), fast_config(), sink);
 
         link.send_ui_state("recording", "");
         link.send_provision("VS-1", "secret");
