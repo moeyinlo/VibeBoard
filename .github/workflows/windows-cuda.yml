@@ -53,6 +53,10 @@ jobs:
       - name: Build core with CUDA backend
         working-directory: core
         env:
+          # CMake picks the CUDA compiler from CUDACXX; without it the hosted image's
+          # FindCUDAToolkit run fails with "No CUDA toolset found".
+          CUDA_PATH: ${{ steps.cuda.outputs.CUDA_PATH }}
+          CUDACXX: ${{ steps.cuda.outputs.CUDA_PATH }}\bin\nvcc.exe
           # Turing / Ampere / Ada / Hopper consumer + datacenter parts.
           CMAKE_CUDA_ARCHITECTURES: "75;86;89;90"
         run: cargo build --release -p vibeboard-core --features whisper-cuda
