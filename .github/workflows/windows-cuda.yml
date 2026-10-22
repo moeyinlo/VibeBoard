@@ -46,7 +46,9 @@ jobs:
           method: network
           # visual_studio_integration provides CUDA.props/targets; without it CMake's VS
           # generator reports "No CUDA toolset found".
-          sub-packages: '["nvcc", "cudart", "cublas", "thrust", "visual_studio_integration"]'
+          # CUDA 13 splits the headers into separate packages: "crt" carries
+          # crt/host_config.h, which cuda_runtime.h includes.
+          sub-packages: '["nvcc", "cudart", "crt", "cublas", "thrust", "visual_studio_integration"]'
 
       - name: Show CUDA compiler
         shell: pwsh
