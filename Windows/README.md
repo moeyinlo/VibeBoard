@@ -62,10 +62,22 @@ cargo build --release -p vibeboard-core --features whisper-vulkan
 
 ### CUDA 版
 
-`.github/workflows/windows-cuda.yml` 在 `windows-latest` 上安装 CUDA Toolkit 并编译
-`--features whisper-cuda`，产出 `vibeboard_core-cuda-windows-x64` 工件（手动触发或打 tag）。
-用它替换 `VibeBoardPlus-windows-x64.zip` 里的同名 DLL 即可；目标机器需要 NVIDIA 驱动与
-CUDA 运行时（`cudart64_12.dll`、`cublas64_12.dll`、`cublasLt64_12.dll`）。
+本机构建（推荐，CUDA/MSVC 版本天然匹配）：
+
+```powershell
+pwsh scripts/build-core-cuda.ps1
+# 产物：core\target\release\vibeboard_core.dll
+```
+
+前置：VS 2022（C++ 工作负载）、CUDA Toolkit（12.9 / 13.x）、CMake、Rust。
+CUDA 与 MSVC 版本必须互相支持，否则 CMake 会报 `No CUDA toolset found`。
+
+CI 也能编（`.github/workflows/windows-cuda.yml`，手动触发、打 tag 或修改该文件时跑），
+产出 `vibeboard_core-cuda-windows-x64` 工件。注意托管 runner 的 MSVC/CUDA 组合偶尔不兼容，
+失败时可改用本机脚本。
+
+拿到的 CUDA DLL 直接替换 `VibeBoardPlus-windows-x64.zip` 里的同名文件即可。目标机器需要
+NVIDIA 驱动与 CUDA 运行时（`cudart64_*.dll`、`cublas64_*.dll`、`cublasLt64_*.dll`）；
 没有可用 GPU 时 whisper.cpp 会自动回落到 CPU。
 
 ## 已知限制
