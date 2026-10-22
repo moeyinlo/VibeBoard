@@ -23,7 +23,9 @@ concurrency:
 jobs:
   build:
     name: build CUDA core
-    runs-on: windows-latest
+    # windows-latest now ships Visual Studio 18 / MSVC 14.51, which no CUDA release
+    # supports yet ("No CUDA toolset found"). windows-2022 has VS 17 / MSVC 14.4x.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
