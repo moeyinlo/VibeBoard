@@ -134,6 +134,9 @@ macOS 实测（M4、`small`、8 线程）：
 | macOS | `libvibeboard_core.a` 静态链接进可执行文件（SwiftPM C target） | 菜单栏、悬浮窗、AX 文本注入、Keychain、Apple 语音识别 |
 | Windows | `vibeboard_core.dll` + P/Invoke | 托盘、悬浮窗、SendInput、DPAPI、Windows 语音识别 |
 
+两端的主窗口都由内核的 `vb_model_catalog()` 渲染模型列表（含用户在模型目录里自行放入的文件），并通过
+`vb_download_model` / `vb_model_remove` 做下载与删除。
+
 C ABI 见 `crates/vibeboard-core/include/vibeboard_core.h`，Swift 侧封装在
 `Sources/VibeBoardPlus/CoreHost.swift`，C# 侧在 `Windows/Core/NativeCore.cs`。
 

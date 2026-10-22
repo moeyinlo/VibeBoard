@@ -11,6 +11,7 @@ public partial class App : System.Windows.Application
     private NativeCore? _core;
     private Coordinator? _coordinator;
     private TrayController? _tray;
+    private MainWindow? _mainWindow;
 
     public static AppSettings Settings { get; private set; } = new();
 
@@ -55,8 +56,19 @@ public partial class App : System.Windows.Application
         var overlay = new OverlayWindow();
         _core = new NativeCore(Settings);
         _coordinator = new Coordinator(Settings, _core, overlay);
-        _tray = new TrayController(_coordinator, Settings);
-        _coordinator.StatusChanged += status => _tray?.SetStatus(status);
+        _mainWindow = new MainWindow(Settings);
+        _tray = new TrayController(_coordinator, ShowMainWindow);
+
+        _coordinator.StatusChanged += status =>
+        {
+            _tray?.SetStatus(status);
+            _mainWindow?.SetStatus(status);
+        };
+        _coordinator.TranscriptChanged += text => _mainWindow?.SetTranscript(text);
+        _core.LocalStats += stats => _mainWindow?.SetEngine(stats);
+        _mainWindow.CancelRequested = () => _coordinator?.Cancel();
+        _mainWindow.CopyLatestRequested = () => _coordinator?.CopyLatest();
+        _mainWindow.ShowLatestRequested = () => _coordinator?.ShowLatest();
 
         if (Settings.AsrProvider == "whisper" && !NativeCore.ModelInstalled(Settings.WhisperModel))
         {
@@ -79,6 +91,14 @@ public partial class App : System.Windows.Application
                 "VibeBoard Plus", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
         }
+    }
+
+    private void ShowMainWindow()
+    {
+        if (_mainWindow is null) return;
+        _mainWindow.Show();
+        _mainWindow.Activate();
+        _mainWindow.Refresh();
     }
 
     protected override void OnExit(ExitEventArgs e)

@@ -1,0 +1,132 @@
+<Window x:Class="VibeBoardPlus.UI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="VibeBoard Plus" Width="980" Height="720" MinWidth="860" MinHeight="620"
+        WindowStartupLocation="CenterScreen" Background="#FFF7F7F9">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="190" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Background="#FFEFEFF2" BorderBrush="#FFDDDDE2" BorderThickness="0,0,1,0">
+            <ListBox x:Name="Nav" Background="Transparent" BorderThickness="0" Margin="8,12"
+                     SelectionChanged="OnNavChanged" FontSize="13">
+                <ListBoxItem Content="概览" Padding="12,8" />
+                <ListBoxItem Content="语音识别" Padding="12,8" />
+                <ListBoxItem Content="模型管理" Padding="12,8" />
+                <ListBoxItem Content="设备按键" Padding="12,8" />
+                <ListBoxItem Content="输出" Padding="12,8" />
+                <ListBoxItem Content="语义整理" Padding="12,8" />
+                <ListBoxItem Content="关于" Padding="12,8" />
+            </ListBox>
+        </Border>
+
+        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="28,22,28,22">
+            <Grid>
+                <!-- 概览 -->
+                <StackPanel x:Name="PageOverview" Visibility="Visible">
+                    <TextBlock x:Name="StatusText" Text="等待设备" FontSize="22" FontWeight="SemiBold" />
+                    <TextBlock Text="按住设备按键说话，松开后文字会按「输出」设置投递，并显示在这里。"
+                               Foreground="#FF6B6B72" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap" />
+                    <Border x:Name="TranscriptPanel" Background="#FFFFFFFF" BorderBrush="#FFDDDDE2" BorderThickness="1"
+                            CornerRadius="8" Margin="0,16,0,0" Height="180" Padding="10">
+                        <Grid>
+                            <TextBox x:Name="TranscriptBox" IsReadOnly="True" BorderThickness="0"
+                                     Background="Transparent" TextWrapping="Wrap" FontSize="16"
+                                     VerticalScrollBarVisibility="Auto" />
+                            <TextBlock x:Name="TranscriptPlaceholder" Text="识别结果会显示在这里"
+                                       Foreground="#FF9A9AA2" FontSize="13" IsHitTestVisible="False"
+                                       Margin="4,2,0,0" />
+                        </Grid>
+                    </Border>
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                        <Button Content="复制最近结果" Width="112" Click="OnCopyLatestButton" />
+                        <Button Content="显示最近结果" Width="112" Margin="8,0,0,0" Click="OnShowLatestButton" />
+                        <Button Content="取消识别" Width="96" Margin="8,0,0,0" Click="OnCancelRecognitionButton" />
+                    </StackPanel>
+
+                    <TextBlock Text="本地引擎" FontSize="15" FontWeight="SemiBold" Margin="0,24,0,6" />
+                    <TextBlock x:Name="EngineText" Foreground="#FF6B6B72" FontSize="12" TextWrapping="Wrap" />
+                    <TextBlock x:Name="StatsText" Foreground="#FF6B6B72" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <Button Content="打开日志" Width="96" HorizontalAlignment="Left" Margin="0,14,0,0" Click="OnOpenLog" />
+                </StackPanel>
+
+                <!-- 语音识别 -->
+                <StackPanel x:Name="PageSpeech" Visibility="Collapsed">
+                    <TextBlock Text="识别服务" FontSize="16" FontWeight="SemiBold" />
+                    <TextBlock Text="Apple 本机识别只在 macOS 提供；Windows 可选本地 Whisper 或 StepFun 云端。切换模型请到「模型管理」。"
+                               Foreground="#FF6B6B72" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0" />
+                    <ComboBox x:Name="ProviderCombo" Width="320" HorizontalAlignment="Left" Margin="0,12,0,0" />
+
+                    <TextBlock Text="StepFun 云端" FontSize="16" FontWeight="SemiBold" Margin="0,24,0,0" />
+                    <ComboBox x:Name="AsrModelCombo" Width="320" HorizontalAlignment="Left" Margin="0,10,0,0" />
+                    <PasswordBox x:Name="RecognitionKeyBox" Width="320" HorizontalAlignment="Left" Margin="0,8,0,0" />
+                    <TextBlock Text="留空表示沿用已保存的密钥；云端整理默认复用这个 Key。"
+                               Foreground="#FF6B6B72" FontSize="12" Margin="0,6,0,0" />
+                    <Button Content="保存识别配置" Width="120" HorizontalAlignment="Left" Margin="0,14,0,0" Click="OnSaveRecognition" />
+                    <TextBlock x:Name="RecognitionStatusText" Foreground="#FF0A7A3D" FontSize="12" Margin="0,8,0,0" />
+                </StackPanel>
+
+                <!-- 模型管理 -->
+                <StackPanel x:Name="PageModels" Visibility="Collapsed">
+                    <TextBlock Text="本地模型" FontSize="16" FontWeight="SemiBold" />
+                    <TextBlock x:Name="ActiveModelText" Foreground="#FF6B6B72" FontSize="12" Margin="0,6,0,0" />
+                    <TextBlock x:Name="ModelStatusText" Foreground="#FF6B6B72" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+                    <ProgressBar x:Name="ModelProgress" Height="6" Margin="0,10,0,0" Visibility="Collapsed" Maximum="100" />
+
+                    <StackPanel x:Name="ModelListPanel" Margin="0,14,0,0" />
+
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                        <Button Content="导入模型文件…" Width="120" Click="OnImportModel" />
+                        <Button Content="打开模型目录" Width="112" Margin="8,0,0,0" Click="OnOpenModelDir" />
+                        <Button Content="重新扫描" Width="88" Margin="8,0,0,0" Click="OnRescanModels" />
+                    </StackPanel>
+                    <TextBlock Text="也可以把任意 ggml-*.bin 丢进模型目录，再点「重新扫描」。下载支持断点续传。"
+                               Foreground="#FF6B6B72" FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+
+                <!-- 设备按键 -->
+                <StackPanel x:Name="PageButtons" Visibility="Collapsed">
+                    <TextBlock Text="设备按键" FontSize="16" FontWeight="SemiBold" />
+                    <TextBlock Text="每个按键的动作保存后立即生效。按住说话 / 切换录音 是录音类动作，其余是快捷键类动作。"
+                               Foreground="#FF6B6B72" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0" />
+                    <StackPanel x:Name="ButtonRowsPanel" Margin="0,14,0,0" />
+                </StackPanel>
+
+                <!-- 输出 -->
+                <StackPanel x:Name="PageOutput" Visibility="Collapsed">
+                    <TextBlock Text="识别输出" FontSize="16" FontWeight="SemiBold" />
+                    <ComboBox x:Name="OutputModeCombo" Width="320" HorizontalAlignment="Left" Margin="0,12,0,0" />
+                    <CheckBox x:Name="AutoCopyCheck" Content="完成后自动复制到剪贴板" Margin="0,14,0,0" />
+                    <TextBlock Text="实时输入会边识别边写入当前输入框；完成后粘贴模拟 Ctrl+V；仅悬浮窗只显示结果。"
+                               Foreground="#FF6B6B72" FontSize="12" TextWrapping="Wrap" Margin="0,12,0,0" />
+                </StackPanel>
+
+                <!-- 语义整理 -->
+                <StackPanel x:Name="PageRewrite" Visibility="Collapsed">
+                    <TextBlock Text="轻度语义整理" FontSize="16" FontWeight="SemiBold" />
+                    <CheckBox x:Name="RewriteCheck" Content="识别完成后用云端做轻度整理（纠错、补标点、去口头语）" Margin="0,14,0,0" />
+                    <TextBox x:Name="RewriteModelBox" Width="320" HorizontalAlignment="Left" Margin="0,10,0,0" />
+                    <PasswordBox x:Name="RewriteKeyBox" Width="320" HorizontalAlignment="Left" Margin="0,8,0,0" />
+                    <TextBlock Text="整理 Key 可留空，默认复用识别 Key。"
+                               Foreground="#FF6B6B72" FontSize="12" Margin="0,6,0,0" />
+                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                        <Button Content="保存整理配置" Width="120" Click="OnSaveRewrite" />
+                        <Button Content="测试云端整理" Width="120" Margin="8,0,0,0" Click="OnTestRewrite" />
+                    </StackPanel>
+                    <TextBlock x:Name="RewriteStatusText" Foreground="#FF0A7A3D" FontSize="12" Margin="0,8,0,0" />
+                </StackPanel>
+
+                <!-- 关于 -->
+                <StackPanel x:Name="PageAbout" Visibility="Collapsed">
+                    <TextBlock Text="关于" FontSize="16" FontWeight="SemiBold" />
+                    <TextBlock x:Name="VersionText" Foreground="#FF6B6B72" FontSize="12" Margin="0,8,0,0" />
+                    <TextBlock x:Name="LogPathText" Foreground="#FF6B6B72" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+                    <TextBlock x:Name="SystemInfoText" Foreground="#FF6B6B72" FontSize="12" Margin="0,12,0,0" TextWrapping="Wrap" />
+                    <Button Content="打开日志" Width="96" HorizontalAlignment="Left" Margin="0,14,0,0" Click="OnOpenLog" />
+                </StackPanel>
+            </Grid>
+        </ScrollViewer>
+    </Grid>
+</Window>

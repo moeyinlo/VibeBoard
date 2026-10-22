@@ -43,4 +43,9 @@ if Bundle.main.bundleIdentifier != nil {
     vlog("running unbundled CLI — apple speech disabled")
 }
 
+// 调试/截图用：VBP_SHOW_MAIN_WINDOW=1 启动时直接打开主窗口。
+if ProcessInfo.processInfo.environment["VBP_SHOW_MAIN_WINDOW"] == "1" {
+    menuBar.openMainWindowForDebugging()
+}
+
 app.run()

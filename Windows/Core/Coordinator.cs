@@ -18,6 +18,8 @@ public sealed class Coordinator : IDisposable
     private bool _active;
 
     public event Action<string>? StatusChanged;
+    /// <summary>Final transcript ("" when a session ends without text).</summary>
+    public event Action<string>? TranscriptChanged;
     public string Latest { get; private set; } = "";
 
     public Coordinator(AppSettings settings, NativeCore core, UI.OverlayWindow overlay)
@@ -91,11 +93,13 @@ public sealed class Coordinator : IDisposable
 
         if (string.IsNullOrEmpty(text))
         {
+            TranscriptChanged?.Invoke("");
             _overlay.ShowTranscript("", true, "未识别到文字");
             return;
         }
 
         Latest = text;
+        TranscriptChanged?.Invoke(text);
         if (_settings.AutoCopy)
         {
             try { System.Windows.Clipboard.SetText(text); }
@@ -127,6 +131,7 @@ public sealed class Coordinator : IDisposable
         _active = false;
         _live = null;
         _overlay.Dismiss();
+        TranscriptChanged?.Invoke("");
     }
 
     private void OnAction(string action)

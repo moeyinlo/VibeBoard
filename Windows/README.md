@@ -28,9 +28,23 @@ dotnet publish -c Release -r win-x64 --self-contained -p:EnableWindowsTargeting=
 CI（`.github/workflows/windows.yml`）在 `windows-latest` 上构建内核 DLL + 应用，产出
 `VibeBoardPlus-windows-x64.zip`。
 
+## 界面
+
+主窗口（托盘「打开主窗口…」或双击图标）左侧 7 个栏目：
+
+| 栏目 | 内容 |
+|---|---|
+| 概览 | 当前状态、最近识别结果（可复制/显示/取消）、本地引擎与 RTF/内存、打开日志 |
+| 语音识别 | 识别服务（Whisper / StepFun / Windows 自带）、云端模型与 API Key |
+| 模型管理 | 模型卡片：安装状态、体积、说明；使用 / 下载 / 删除；导入文件、打开目录、重新扫描 |
+| 设备按键 | K1–K4 动作映射，保存即生效 |
+| 输出 | 实时输入 / 完成后粘贴 / 仅悬浮窗，自动复制 |
+| 语义整理 | 开关、整理模型、独立 Key、云端连通性测试 |
+| 关于 | 版本、内核版本、日志路径、whisper.cpp 设备报告 |
+
 ## 功能
 
-- 托盘菜单：状态、显示/复制最近结果、取消识别、设置、打开日志、退出
+- 托盘菜单：状态、显示/复制最近结果、取消识别、打开主窗口、打开日志、退出
 - 悬浮窗：置顶、不抢焦点（`WS_EX_NOACTIVATE`）、8 秒后自动隐藏、可复制
 - 文本输出三种模式：
   - **实时输入**：`SendInput` 逐字写入当前输入框，修订时用退格替换本次内容
@@ -44,7 +58,8 @@ CI（`.github/workflows/windows.yml`）在 `windows-latest` 上构建内核 DLL 
   （「打开模型目录」）由内核自动发现；保存后立即生效，无需重启
 - 本地模型应用内下载（默认 `hf-mirror.com` → `huggingface.co`），断点续传 + 自动重试，
   显示进度与已安装状态；程序不内置模型，首次使用需在设置里下载
-- 设置页展示加速后端（CPU / CUDA / Vulkan）、已编译后端、RTF、耗时、线程数与峰值内存
+- 主窗口展示加速后端（CPU / CUDA / Vulkan）、已编译后端、RTF、耗时、线程数与峰值内存
+- 模型管理支持下载、删除、切换与导入；下载带进度与断点续传
 - 语义整理：StepFun chat completions，默认复用识别 Key；额度/密钥错误会显示中文提示
 - 凭据：DPAPI（当前用户）加密后存于 `%APPDATA%\VibeBoardPlus\settings.json`
 - 日志：`%LOCALAPPDATA%\VibeBoardPlus\vibeboardplus.log`

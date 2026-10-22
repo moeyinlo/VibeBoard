@@ -10,14 +10,13 @@ public sealed class TrayController : IDisposable
 {
     private readonly NotifyIcon _icon;
     private readonly Coordinator _coordinator;
-    private readonly AppSettings _settings;
     private readonly ToolStripMenuItem _status;
-    private SettingsWindow? _settingsWindow;
+    private readonly Action _openWindow;
 
-    public TrayController(Coordinator coordinator, AppSettings settings)
+    public TrayController(Coordinator coordinator, Action openWindow)
     {
         _coordinator = coordinator;
-        _settings = settings;
+        _openWindow = openWindow;
 
         _status = new ToolStripMenuItem("等待设备") { Enabled = false };
         var menu = new ContextMenuStrip();
@@ -27,7 +26,7 @@ public sealed class TrayController : IDisposable
         menu.Items.Add(Item("复制最近识别结果", (_, _) => _coordinator.CopyLatest()));
         menu.Items.Add(Item("取消识别", (_, _) => _coordinator.Cancel()));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(Item("设置…", (_, _) => ShowSettings()));
+        menu.Items.Add(Item("打开主窗口…", (_, _) => _openWindow()));
         menu.Items.Add(Item("打开日志", (_, _) => OpenLog()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(Item("退出 VibeBoard Plus", (_, _) => System.Windows.Application.Current.Shutdown()));
@@ -39,7 +38,7 @@ public sealed class TrayController : IDisposable
             Visible = true,
             ContextMenuStrip = menu,
         };
-        _icon.DoubleClick += (_, _) => _coordinator.ShowLatest();
+        _icon.DoubleClick += (_, _) => _openWindow();
     }
 
     private static ToolStripMenuItem Item(string text, EventHandler handler)
@@ -62,16 +61,6 @@ public sealed class TrayController : IDisposable
         var dispatcher = System.Windows.Application.Current?.Dispatcher;
         if (dispatcher is null || dispatcher.CheckAccess()) Update();
         else dispatcher.BeginInvoke(Update);
-    }
-
-    private void ShowSettings()
-    {
-        if (_settingsWindow is null || !_settingsWindow.IsLoaded)
-        {
-            _settingsWindow = new SettingsWindow(_settings);
-        }
-        _settingsWindow.Show();
-        _settingsWindow.Activate();
     }
 
     private static void OpenLog()

@@ -6,8 +6,8 @@ final class AppSettingsTests: XCTestCase {
     @MainActor
     func testSecureFieldPastesAndReplacesSelection() throws {
         _ = NSApplication.shared
-        let window = SettingsEditingWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 100),
-                                           styleMask: [.titled], backing: .buffered, defer: false)
+        let window = MainWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 100),
+                                styleMask: [.titled], backing: .buffered, defer: false)
         let field = NSSecureTextField(frame: NSRect(x: 10, y: 10, width: 300, height: 24))
         window.contentView?.addSubview(field)
         field.selectText(nil)
@@ -74,16 +74,14 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
-    func testSavingRecognitionAndRefocusingPreserveRewriteDraft() throws {
+    func testSavingRecognitionPreservesRewriteDraft() throws {
         _ = NSApplication.shared
         let name = "vibeboardplus.settings.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = AppSettings(defaults: defaults)
-        // Saving the recognition page must not disturb the rewrite settings, whatever their
-        // current value is (cleanup is on by default now).
         let rewriteBefore = settings.rewrite
-        let controller = SettingsWindow(settings: settings, buttons: ButtonSettings())
+        let controller = MainWindowController(settings: settings, buttons: ButtonSettings())
         let window = try XCTUnwrap(controller.window)
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let views = descendants(try XCTUnwrap(window.contentView))
@@ -98,47 +96,46 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
-    func testSettingsWindowLayout() throws {
+    func testMainWindowSectionsAndLayout() throws {
         _ = NSApplication.shared
-        let controller = SettingsWindow(settings: AppSettings(), buttons: ButtonSettings())
+        let controller = MainWindowController(settings: AppSettings(), buttons: ButtonSettings())
+        XCTAssertEqual(controller.sectionTitles,
+                       ["概览", "语音识别", "模型管理", "设备按键", "输出", "语义整理", "关于"])
+
         let content = try XCTUnwrap(controller.window?.contentView)
         content.layoutSubtreeIfNeeded()
-        func check(_ view: NSView) {
+
+        func check(_ view: NSView, in bounds: NSRect) {
             guard !view.isHidden else { return }
-            if view is NSControl {
-                let rect = view.convert(view.bounds, to: content)
-                XCTAssertTrue(content.bounds.insetBy(dx: -1, dy: -1).contains(rect), "Clipped control: \(view)")
+            if view is NSControl, view.bounds.width > 0 {
+                let rect = view.convert(view.bounds, to: nil)
+                // 横向不能超出窗口，纵向允许滚动。
+                XCTAssertGreaterThanOrEqual(rect.minX, -2, "Control starts left of the window: \(view)")
+                XCTAssertLessThanOrEqual(rect.maxX, content.bounds.width + 2, "Control clipped on the right: \(view)")
             }
-            for child in view.subviews { check(child) }
+            for child in view.subviews { check(child, in: bounds) }
         }
-        let tabs = try XCTUnwrap(content.subviews.compactMap { $0 as? NSSegmentedControl }.first)
-        XCTAssertEqual(tabs.segmentCount, 5)
-        XCTAssertEqual(tabs.label(forSegment: 3), "语音识别")
-        XCTAssertEqual(tabs.label(forSegment: 4), "语义整理")
-        for index in 0..<tabs.segmentCount {
-            tabs.selectedSegment = index
-            tabs.sendAction(tabs.action, to: tabs.target)
+
+        for index in 0..<controller.sectionTitles.count {
+            controller.selectSection(index)
             content.layoutSubtreeIfNeeded()
-            check(content)
-            if index >= 3 {
-                let snapshot = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
-                content.cacheDisplay(in: content.bounds, to: snapshot)
-                let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("vibeboardplus-settings-\(index).png")
-                try XCTUnwrap(snapshot.representation(using: .png, properties: [:])).write(to: url)
+            for page in controller.pageViews { check(page, in: content.bounds) }
+            if index == 2 {
+                // 模型管理页应当渲染出模型卡片（至少内置目录里的模型）。
+                let texts = controller.pageViews.flatMap { view -> [String] in
+                    func collect(_ view: NSView) -> [String] {
+                        (view as? NSTextField).map { [$0.stringValue] } ?? [] + view.subviews.flatMap(collect)
+                    }
+                    return collect(view)
+                }
+                XCTAssertTrue(texts.contains { $0.contains("当前使用") }, "model page should show the active model")
             }
         }
-        let bitmap = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
-        content.cacheDisplay(in: content.bounds, to: bitmap)
-        let image = NSImage(size: content.bounds.size)
-        image.lockFocus()
-        NSColor.windowBackgroundColor.setFill()
-        content.bounds.fill()
-        bitmap.draw(in: content.bounds)
-        image.unlockFocus()
-        let composite = try XCTUnwrap(NSBitmapImageRep(data: XCTUnwrap(image.tiffRepresentation)))
-        let data = try XCTUnwrap(composite.representation(using: .png, properties: [:]))
-        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("vibeboardplus-settings.png")
-        try data.write(to: url)
+
+        let snapshot = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+        content.cacheDisplay(in: content.bounds, to: snapshot)
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("vibeboardplus-main.png")
+        try XCTUnwrap(snapshot.representation(using: .png, properties: [:])).write(to: url)
         print("Settings snapshot: \(url.path)")
     }
 }

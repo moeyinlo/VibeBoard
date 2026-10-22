@@ -7,7 +7,7 @@ final class MenuBarController: NSObject {
     private var latestText = ""
     private let output = RecognitionOutput()
     private let keyboard = KeyboardActionSender()
-    private var settingsWindow: SettingsWindow?
+    private var mainWindow: MainWindowController?
     private var diagnosticWindow: DiagnosticWindow?
     private let settings = AppSettings()
     var buttonSettings: ButtonSettings?
@@ -26,7 +26,7 @@ final class MenuBarController: NSObject {
         let menu = NSMenu()
         menu.addItem(status)
         menu.addItem(.separator())
-        add("设置…", action: #selector(showSettings), to: menu)
+        add("打开主窗口…", action: #selector(showMainWindow), to: menu)
         add("诊断日志…", action: #selector(showDiagnostics), to: menu)
         add("显示最近识别结果", action: #selector(showLatest), to: menu)
         add("复制最近识别结果", action: #selector(copyText), to: menu)
@@ -43,6 +43,7 @@ final class MenuBarController: NSObject {
 
     func updateStatus(_ text: String) {
         status.title = text
+        mainWindow?.updateStatus(text)
         output.status(text)
         if text == "设备已断开" {
             generation = UUID()
@@ -53,15 +54,20 @@ final class MenuBarController: NSObject {
     }
 
     func beginRecognition() {
+        mainWindow?.refreshOverview()
         generation = UUID()
         rewriteTask?.cancel()
         rewriteTimeout?.cancel()
         output.begin(mode: settings.outputMode, autoCopy: settings.autoCopy)
     }
-    func receivePartial(_ text: String) { output.receive(text, final: false) }
+    func receivePartial(_ text: String) {
+        output.receive(text, final: false)
+        mainWindow?.refreshOverview()
+    }
 
     func receive(_ text: String) {
         latestText = text
+        mainWindow?.refreshOverview()
         status.title = "识别完成"
         guard settings.rewrite, !text.isEmpty, SemanticRewriter.isAvailable else {
             output.receive(text, final: true)
@@ -104,15 +110,26 @@ final class MenuBarController: NSObject {
 
     @objc private func showLatest() { output.showLatest(latestText) }
 
-    @objc private func showSettings() {
+    @objc private func showMainWindow() {
         guard let buttonSettings else { return }
-        if settingsWindow == nil { settingsWindow = SettingsWindow(settings: settings, buttons: buttonSettings) }
-        settingsWindow?.present()
+        if mainWindow == nil {
+            let controller = MainWindowController(settings: settings, buttons: buttonSettings)
+            controller.statusProvider = { [weak self] in self?.status.title ?? "等待设备" }
+            controller.latestTextProvider = { [weak self] in self?.latestText ?? "" }
+            controller.onCancel = { [weak self] in self?.cancelRecognition() }
+            mainWindow = controller
+        }
+        mainWindow?.present()
     }
 
     @objc private func showDiagnostics() {
         if diagnosticWindow == nil { diagnosticWindow = DiagnosticWindow() }
         diagnosticWindow?.present()
+    }
+
+    /// 启动时直接展示主窗口（截图 / 调试用）。
+    func openMainWindowForDebugging() {
+        showMainWindow()
     }
 
     func cancelRecognition() {
