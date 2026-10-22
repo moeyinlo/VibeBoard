@@ -25,9 +25,9 @@ final class AppSettings {
         get { defaults.string(forKey: "cloudRewriteModel") ?? "step-3.5-flash" }
         set { defaults.set(newValue, forKey: "cloudRewriteModel") }
     }
-    /// Local Whisper model name: tiny | base | small | medium | large-v3-turbo.
+    /// Local Whisper model name; see `models::MODELS` in the core for the catalogue.
     var whisperModel: String {
-        get { defaults.string(forKey: "whisperModel") ?? "small" }
+        get { defaults.string(forKey: "whisperModel") ?? "large-v3-turbo-q5_0" }
         set { defaults.set(newValue, forKey: "whisperModel") }
     }
     var rewriteEngine: String {
@@ -179,7 +179,7 @@ final class SettingsWindow: NSWindowController {
         asrModel.addItems(withTitles: ["stepaudio-2.5-asr-stream", "step-asr-1.1-stream", "stepaudio-2.5-asr", "step-asr"])
         asrModel.target = self; asrModel.action = #selector(saveRecognition)
         addRow("语音模型", control: asrModel, page: pages[3])
-        whisperModel.addItems(withTitles: ["tiny", "base", "small", "medium", "large-v3-turbo"])
+        whisperModel.addItems(withTitles: ["tiny", "base", "small", "small-q5_1", "medium", "medium-q5_0", "large-v3-turbo", "large-v3-turbo-q5_0", "large-v3-turbo-q8_0"])
         whisperModel.target = self; whisperModel.action = #selector(changeWhisperModel)
         addRow("本地模型", control: whisperModel, page: pages[3])
         whisperDownload.target = self; whisperDownload.action = #selector(downloadWhisper)
@@ -312,7 +312,7 @@ final class SettingsWindow: NSWindowController {
         guard saveKey(recognitionKey, purpose: .recognition, status: recognitionStatus) else { return }
         settings.asrProvider = ["apple", "stepfun", "whisper"][provider.indexOfSelectedItem]
         settings.asrModel = asrModel.titleOfSelectedItem ?? "stepaudio-2.5-asr-stream"
-        settings.whisperModel = whisperModel.titleOfSelectedItem ?? "small"
+        settings.whisperModel = whisperModel.titleOfSelectedItem ?? "large-v3-turbo-q5_0"
         recognitionStatus.stringValue = "识别配置已保存，下次录音生效"
         NotificationCenter.default.post(name: .vibeboardConfigurationChanged, object: nil)
         refreshStatus()
@@ -350,7 +350,7 @@ final class SettingsWindow: NSWindowController {
         AppleSpeechProvider.requestAuthorization { _ in DispatchQueue.main.async { self.refreshStatus() } }
     }
     @objc private func changeWhisperModel() {
-        settings.whisperModel = whisperModel.titleOfSelectedItem ?? "small"
+        settings.whisperModel = whisperModel.titleOfSelectedItem ?? "large-v3-turbo-q5_0"
         NotificationCenter.default.post(name: .vibeboardConfigurationChanged, object: nil)
         refreshWhisperStatus()
     }

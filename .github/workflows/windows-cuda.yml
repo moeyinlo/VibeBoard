@@ -2,7 +2,8 @@ name: windows-cuda
 
 # CUDA 需要 nvcc：GitHub 托管的 runner 没有 GPU，但可以安装 CUDA Toolkit 编译出
 # 带 CUDA 后端的 DLL。产物在用户机器上会使用 NVIDIA GPU；没有 GPU 时 whisper.cpp
-# 自动回落到 CPU。因为编译很重（约 10 分钟、数 GB 下载），只在手动触发和打 tag 时跑。
+# 自动回落到 CPU。因为编译很重（约 10 分钟、数 GB 下载），只在手动触发、打 tag
+# 或修改本文件时跑。
 
 on:
   workflow_dispatch:
