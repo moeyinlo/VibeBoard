@@ -9,6 +9,8 @@ on:
   push:
     tags:
       - "v*"
+    paths:
+      - ".github/workflows/windows-cuda.yml"
 
 concurrency:
   group: windows-cuda-${{ github.ref }}
