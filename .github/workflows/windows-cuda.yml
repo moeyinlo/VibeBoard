@@ -35,7 +35,7 @@ jobs:
           key: cuda
 
       - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.22
+        uses: Jimver/cuda-toolkit@v0.2.36
         id: cuda
         with:
           # CUDA 12.6 predates the MSVC shipped on windows-latest and fails with
