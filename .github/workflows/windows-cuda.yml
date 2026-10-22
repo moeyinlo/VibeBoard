@@ -6,15 +6,11 @@ name: windows-cuda
 # 或修改本文件时跑。
 
 on:
+  # 只在手动触发或打 tag 时跑：托管 runner 的 CUDA 组合不稳定，见下方说明。
   workflow_dispatch:
   push:
-    # Without `branches`, GitHub only fires this workflow for the listed tags.
-    branches:
-      - "**"
     tags:
       - "v*"
-    paths:
-      - ".github/workflows/windows-cuda.yml"
 
 concurrency:
   group: windows-cuda-${{ github.ref }}
@@ -28,9 +24,8 @@ jobs:
     #   * windows-2022 的 VS 17 可用，但 CUDA 13 的 CRT 头文件需要单独子包，
     #     且 CMake 的 VS 生成器依赖 CUDA 的 VS 集成组件
     # 因此本地构建（Windows/scripts/build-core-cuda.ps1）是推荐路径；
-    # 这个 job 保留为尽力而为的验证，不阻塞分支。
+    # 这个 job 保留作参考；失败是真实结果，不做掩盖。推荐用本机脚本构建。
     runs-on: windows-2022
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
