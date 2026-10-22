@@ -44,7 +44,9 @@ jobs:
           # with "No CUDA toolset found" during compiler detection.
           cuda: "13.0.1"
           method: network
-          sub-packages: '["nvcc", "cudart", "cublas", "thrust"]'
+          # visual_studio_integration provides CUDA.props/targets; without it CMake's VS
+          # generator reports "No CUDA toolset found".
+          sub-packages: '["nvcc", "cudart", "cublas", "thrust", "visual_studio_integration"]'
 
       - name: Show CUDA compiler
         shell: pwsh
