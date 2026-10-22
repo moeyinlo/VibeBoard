@@ -7,6 +7,9 @@ name: windows-cuda
 on:
   workflow_dispatch:
   push:
+    # Without `branches`, GitHub only fires this workflow for the listed tags.
+    branches:
+      - "**"
     tags:
       - "v*"
     paths:
