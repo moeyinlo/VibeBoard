@@ -38,9 +38,9 @@ jobs:
         uses: Jimver/cuda-toolkit@v0.2.36
         id: cuda
         with:
-          # CUDA 12.6 predates the MSVC shipped on windows-latest and fails with
-          # "No CUDA toolset found"; 12.9 supports the current toolset.
-          cuda: "12.9.0"
+          # Newer CUDA lines support the MSVC shipped on windows-latest; older ones fail
+          # with "No CUDA toolset found" during compiler detection.
+          cuda: "13.0.1"
           method: network
           sub-packages: '["nvcc", "cudart", "cublas", "thrust"]'
 
