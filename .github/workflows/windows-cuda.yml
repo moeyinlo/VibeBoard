@@ -59,18 +59,19 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist/cuda | Out-Null
           Copy-Item core/target/release/vibeboard_core.dll dist/cuda/
-          @"
-vibeboard_core.dll — CUDA build (whisper-cuda)
-
-Requirements on the target machine:
-  * NVIDIA GPU + driver
-  * CUDA runtime DLLs next to the app (or CUDA Toolkit installed):
-      cudart64_12.dll, cublas64_12.dll, cublasLt64_12.dll
-
-Usage: replace the DLL shipped with VibeBoardPlus-windows-x64.zip.
-Check the active backend in Settings -> Speech recognition (should show CUDA).
-Without a usable GPU whisper.cpp falls back to CPU automatically.
-"@ | Set-Content dist/cuda/README-CUDA.txt -Encoding UTF8
+          $note = @(
+            "vibeboard_core.dll - CUDA build (whisper-cuda)",
+            "",
+            "Requirements on the target machine:",
+            "  NVIDIA GPU + driver",
+            "  CUDA runtime DLLs next to the app (or CUDA Toolkit installed):",
+            "    cudart64_12.dll, cublas64_12.dll, cublasLt64_12.dll",
+            "",
+            "Usage: replace the DLL shipped with VibeBoardPlus-windows-x64.zip.",
+            "Check the active backend in Settings - Speech recognition (should show CUDA).",
+            "Without a usable GPU whisper.cpp falls back to CPU automatically."
+          )
+          $note | Set-Content dist/cuda/README-CUDA.txt -Encoding UTF8
 
       - uses: actions/upload-artifact@v4
         with:

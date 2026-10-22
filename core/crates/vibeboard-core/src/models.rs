@@ -306,7 +306,10 @@ pub fn ensure(model: &str, mut progress: impl FnMut(Progress)) -> Result<PathBuf
                 continue;
             }
 
-            progress(Progress { received, total: total.or(Some(received)) });
+            progress(Progress {
+                received,
+                total: total.or(Some(received)),
+            });
             finished = true;
             break 'hosts;
         }
