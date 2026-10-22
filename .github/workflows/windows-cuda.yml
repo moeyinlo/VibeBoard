@@ -1,0 +1,77 @@
+name: windows-cuda
+
+# CUDA 需要 nvcc：GitHub 托管的 runner 没有 GPU，但可以安装 CUDA Toolkit 编译出
+# 带 CUDA 后端的 DLL。产物在用户机器上会使用 NVIDIA GPU；没有 GPU 时 whisper.cpp
+# 自动回落到 CPU。因为编译很重（约 10 分钟、数 GB 下载），只在手动触发和打 tag 时跑。
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: windows-cuda-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build CUDA core
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+          key: cuda
+
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.22
+        id: cuda
+        with:
+          cuda: "12.6.0"
+          method: network
+          sub-packages: '["nvcc", "cudart", "cublas", "thrust"]'
+
+      - name: Build core with CUDA backend
+        working-directory: core
+        env:
+          # Turing / Ampere / Ada / Hopper consumer + datacenter parts.
+          CMAKE_CUDA_ARCHITECTURES: "75;86;89;90"
+        run: cargo build --release -p vibeboard-core --features whisper-cuda
+
+      - name: Verify the DLL was produced
+        shell: pwsh
+        run: |
+          $dll = "core/target/release/vibeboard_core.dll"
+          if (-not (Test-Path $dll)) { throw "CUDA build produced no DLL at $dll" }
+          $size = (Get-Item $dll).Length
+          if ($size -lt 5MB) { throw "DLL looks too small for a CUDA build: $size bytes" }
+          Get-Item $dll | Format-List Name, Length
+
+      - name: Stage artifact with a note
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/cuda | Out-Null
+          Copy-Item core/target/release/vibeboard_core.dll dist/cuda/
+          @"
+vibeboard_core.dll — CUDA build (whisper-cuda)
+
+Requirements on the target machine:
+  * NVIDIA GPU + driver
+  * CUDA runtime DLLs next to the app (or CUDA Toolkit installed):
+      cudart64_12.dll, cublas64_12.dll, cublasLt64_12.dll
+
+Usage: replace the DLL shipped with VibeBoardPlus-windows-x64.zip.
+Check the active backend in Settings -> Speech recognition (should show CUDA).
+Without a usable GPU whisper.cpp falls back to CPU automatically.
+"@ | Set-Content dist/cuda/README-CUDA.txt -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vibeboard_core-cuda-windows-x64
+          path: dist/cuda/*
+          if-no-files-found: error

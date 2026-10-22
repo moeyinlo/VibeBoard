@@ -16,7 +16,7 @@ public partial class SettingsWindow : Window
     private readonly Dictionary<string, ComboBox> _buttonChoices = new();
     private readonly List<OutputMode> _modes = new() { OutputMode.Overlay, OutputMode.LiveInput, OutputMode.PasteOnCompletion };
     private readonly List<string> _providers = new() { "whisper", "stepfun", "external" };
-    private readonly List<string> _models = new() { "tiny", "base", "small", "medium", "large-v3-turbo" };
+    private readonly List<string> _models = new() { "tiny", "base", "small", "small-q5_1", "medium", "medium-q5_0", "large-v3-turbo", "large-v3-turbo-q5_0", "large-v3-turbo-q8_0" };
 
     public SettingsWindow(AppSettings settings)
     {

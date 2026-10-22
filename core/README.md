@@ -81,7 +81,18 @@ cargo fmt --all -- --check
 
 模型不随包分发，按需下载到用户目录（macOS `~/Library/Application Support/VibeBoardPlus/models`，
 Windows `%LOCALAPPDATA%\VibeBoardPlus\models`）。默认走 `hf-mirror.com`，失败再退 `huggingface.co`；
-可用 `VIBEBOARD_MODEL_MIRROR=https://你的镜像` 覆盖（逗号分隔多个）。
+可用 `VIBEBOARD_MODEL_MIRROR=https://你的镜像` 覆盖（逗号分隔多个）。下载支持**断点续传**
+（HTTP Range）与每个源 3 次自动重试，大模型（500 MB ~ 1.5 GB）中断后重跑即可继续。
+
+模型清单（whisper.cpp v1.9.5，2026-10 仍无 Whisper v4；turbo 是当前最好的中文选择）：
+
+| 名称 | 体积 | 说明 |
+|---|---|---|
+| tiny / base | 75 / 142 MB | 快，中文差 |
+| small / small-q5_1 | 466 / 181 MB | 一般；q5 更小更快 |
+| medium / medium-q5_0 | 1500 / 514 MB | 更准，偏慢 |
+| large-v3-turbo / -q5_0 / -q8_0 | 1549 / 547 / 834 MB | **推荐 q5_0**：体积接近 small，中文明显更好 |
+| large-v3 | 2952 MB | 最准，最慢 |
 
 ```sh
 vibeboard --download-model small          # 465 MB，中文可用

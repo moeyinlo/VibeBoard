@@ -66,7 +66,7 @@ impl Default for SessionConfig {
         Self {
             provider: ProviderChoice::StepFun,
             model: "stepaudio-2.5-asr-stream".into(),
-            whisper_model: "small".into(),
+            whisper_model: "large-v3-turbo-q5_0".into(),
             recognition_key: String::new(),
             rewrite_enabled: false,
             rewrite_model: "step-3.5-flash".into(),

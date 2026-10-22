@@ -56,7 +56,7 @@ public sealed class AppSettings
     // 默认走本地 Whisper：无需云端额度，离线可用。
     public string AsrProvider { get; set; } = "whisper";           // stepfun | whisper | external
     public string AsrModel { get; set; } = "stepaudio-2.5-asr-stream";
-    public string WhisperModel { get; set; } = "small";
+    public string WhisperModel { get; set; } = "large-v3-turbo-q5_0";
     public string OutputModeKey { get; set; } = "pasteOnCompletion";
     public bool AutoCopy { get; set; } = true;
     public bool RewriteEnabled { get; set; }
