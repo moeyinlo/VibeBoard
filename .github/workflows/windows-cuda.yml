@@ -40,7 +40,7 @@ jobs:
         with:
           # CUDA 12.6 predates the MSVC shipped on windows-latest and fails with
           # "No CUDA toolset found"; 12.9 supports the current toolset.
-          cuda: "12.9.1"
+          cuda: "12.9.0"
           method: network
           sub-packages: '["nvcc", "cudart", "cublas", "thrust"]'
 
