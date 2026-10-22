@@ -94,6 +94,12 @@ Windows `%LOCALAPPDATA%\VibeBoardPlus\models`）。默认走 `hf-mirror.com`，�
 | large-v3-turbo / -q5_0 / -q8_0 | 1549 / 547 / 834 MB | **推荐 q5_0**：体积接近 small，中文明显更好 |
 | large-v3 | 2952 MB | 最准，最慢 |
 
+**换模型不需要改配置或重启**：设置页保存后会立刻把新模型推给内核，下一次录音即生效。
+
+- 内置列表之外，可以点「选择模型文件…」指定任意 `ggml-*.bin`
+- 也可以直接把模型文件丢进模型目录（设置页有「打开模型目录」），内核会自动发现并列出来
+- 目录里的自定义模型在列表里标为「自定义」，选择后按绝对路径加载
+
 ```sh
 vibeboard --download-model small          # 465 MB，中文可用
 vibeboard --download-model large-v3-turbo # 1.6 GB，中文最准

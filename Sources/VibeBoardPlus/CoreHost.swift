@@ -252,6 +252,13 @@ final class CoreHost {
         return array
     }
 
+    /// Directory users can drop `ggml-*.bin` files into.
+    static func modelDirectory() -> String {
+        guard let pointer = vb_model_dir() else { return "" }
+        defer { vb_string_free(pointer) }
+        return String(cString: pointer)
+    }
+
     static func modelInstalled(_ name: String) -> Bool {
         name.withCString { vb_model_available($0) != 0 }
     }

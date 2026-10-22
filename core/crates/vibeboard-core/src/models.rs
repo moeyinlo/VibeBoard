@@ -12,6 +12,19 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+/// A model file that actually exists on disk, whether from the built-in catalogue or
+/// dropped into the models directory by the user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledModel {
+    /// Display name (file stem without the `ggml-` prefix).
+    pub name: String,
+    pub file_name: String,
+    pub path: PathBuf,
+    pub size_mb: u64,
+    /// False when the user supplied the file (not in the built-in catalogue).
+    pub builtin: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModelSpec {
     pub name: &'static str,
@@ -327,6 +340,76 @@ pub fn ensure(model: &str, mut progress: impl FnMut(Progress)) -> Result<PathBuf
     Ok(target)
 }
 
+/// Extracts a display name from a `ggml-*.bin` file name.
+pub fn display_name(file_name: &str) -> Option<String> {
+    if !file_name.starts_with("ggml-") || !file_name.ends_with(".bin") {
+        return None;
+    }
+    let name = file_name
+        .trim_start_matches("ggml-")
+        .trim_end_matches(".bin");
+    if name.is_empty() {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+/// Every usable model file in the models directory, catalogue entries first.
+///
+/// Users can drop any `ggml-*.bin` into the directory and it shows up in the settings UI
+/// without being added to the built-in catalogue.
+pub fn installed_models() -> Vec<InstalledModel> {
+    let mut found: Vec<InstalledModel> = Vec::new();
+    let dir = models_dir();
+
+    for spec in MODELS {
+        let path = dir.join(spec.file_name);
+        if let Ok(meta) = fs::metadata(&path) {
+            if meta.is_file() && meta.len() > 0 {
+                found.push(InstalledModel {
+                    name: spec.name.to_string(),
+                    file_name: spec.file_name.to_string(),
+                    path,
+                    size_mb: meta.len() / (1024 * 1024),
+                    builtin: true,
+                });
+            }
+        }
+    }
+
+    if let Ok(entries) = fs::read_dir(&dir) {
+        let mut extra: Vec<InstalledModel> = entries
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.path();
+                let name = path.file_name()?.to_string_lossy().to_string();
+                if !name.starts_with("ggml-") || !name.ends_with(".bin") {
+                    return None;
+                }
+                if found.iter().any(|model| model.file_name == name) {
+                    return None;
+                }
+                let meta = entry.metadata().ok()?;
+                if !meta.is_file() || meta.len() == 0 {
+                    return None;
+                }
+                let display = display_name(&name)?;
+                Some(InstalledModel {
+                    name: display,
+                    file_name: name,
+                    path,
+                    size_mb: meta.len() / (1024 * 1024),
+                    builtin: false,
+                })
+            })
+            .collect();
+        extra.sort_by(|a, b| a.name.cmp(&b.name));
+        found.extend(extra);
+    }
+
+    found
+}
+
 /// Best-effort download of the default model when nothing is installed yet.
 pub fn ensure_default(progress: impl FnMut(Progress)) -> Result<PathBuf, String> {
     ensure("large-v3-turbo-q5_0", progress)
@@ -395,6 +478,17 @@ mod tests {
             .fraction(),
             None
         );
+    }
+
+    #[test]
+    fn display_names_come_from_ggml_file_names() {
+        assert_eq!(
+            display_name("ggml-large-v3-turbo-q5_0.bin").as_deref(),
+            Some("large-v3-turbo-q5_0")
+        );
+        assert!(display_name("ggml-.bin").is_none());
+        assert!(display_name("whisper-large.bin").is_none());
+        assert!(display_name("ggml-base.txt").is_none());
     }
 
     #[test]

@@ -40,6 +40,8 @@ CI（`.github/workflows/windows.yml`）在 `windows-latest` 上构建内核 DLL 
 - 识别服务：本地 Whisper（默认，`large-v3-turbo-q5_0`）、StepFun 云端、Windows 自带语音识别
 - 可选模型：tiny / base / small / small-q5_1 / medium / medium-q5_0 /
   large-v3-turbo / large-v3-turbo-q5_0（547 MB，推荐）/ large-v3-turbo-q8_0
+- 模型可自行更换：设置页「选择模型文件…」指定任意 `ggml-*.bin`，或把文件放进模型目录
+  （「打开模型目录」）由内核自动发现；保存后立即生效，无需重启
 - 本地模型应用内下载（默认 `hf-mirror.com` → `huggingface.co`），断点续传 + 自动重试，
   显示进度与已安装状态；程序不内置模型，首次使用需在设置里下载
 - 设置页展示加速后端（CPU / CUDA / Vulkan）、已编译后端、RTF、耗时、线程数与峰值内存

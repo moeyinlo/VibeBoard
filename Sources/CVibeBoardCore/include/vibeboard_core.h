@@ -90,6 +90,9 @@ int32_t vb_download_model(const char* name,
                           void* userdata,
                           char** error);
 int32_t vb_model_available(const char* name);
+
+/* Absolute path of the models directory; users may drop ggml-*.bin files there. */
+char* vb_model_dir(void);
 int32_t vb_model_remove(const char* name, char** error);
 
 char* vb_version(void);

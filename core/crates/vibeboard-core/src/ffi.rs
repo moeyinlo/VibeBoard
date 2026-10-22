@@ -508,20 +508,50 @@ fn local_backend_json() -> *mut c_char {
 /// Model catalogue as JSON: `[{name,fileName,sizeMb,quality}]`.
 #[no_mangle]
 pub extern "C" fn vb_model_catalog() -> *mut c_char {
-    let models: Vec<serde_json::Value> = crate::models::MODELS
+    let installed = crate::models::installed_models();
+    let mut models: Vec<serde_json::Value> = crate::models::MODELS
         .iter()
         .map(|spec| {
+            let path = crate::models::path_for(spec.name);
+            let present = installed
+                .iter()
+                .find(|model| model.file_name == spec.file_name);
             serde_json::json!({
                 "name": spec.name,
                 "fileName": spec.file_name,
                 "sizeMb": spec.size_mb,
                 "quality": spec.quality,
-                "installed": crate::models::path_for(spec.name).is_file(),
-                "path": crate::models::path_for(spec.name).to_string_lossy(),
+                "installed": present.is_some(),
+                "path": path.to_string_lossy(),
+                "builtin": true,
+                "actualSizeMb": present.map(|model| model.size_mb).unwrap_or(0),
             })
         })
         .collect();
+
+    // Files the user dropped into the models directory (not in the catalogue).
+    for model in installed.iter().filter(|model| !model.builtin) {
+        models.push(serde_json::json!({
+            "name": model.name,
+            "fileName": model.file_name,
+            "sizeMb": model.size_mb,
+            "quality": "自定义模型（目录中发现）",
+            "installed": true,
+            "path": model.path.to_string_lossy(),
+            "builtin": false,
+            "actualSizeMb": model.size_mb,
+        }));
+    }
+
     to_c_string(&serde_json::Value::Array(models).to_string())
+}
+
+/// Absolute path of the models directory (created on demand).
+#[no_mangle]
+pub extern "C" fn vb_model_dir() -> *mut c_char {
+    let dir = crate::models::models_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    to_c_string(&dir.to_string_lossy())
 }
 
 /// Downloads a model synchronously, reporting `(received, total, hasTotal)`.

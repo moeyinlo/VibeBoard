@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 enum OutputMode: String, CaseIterable {    case overlay, liveInput, pasteOnCompletion
     var title: String {
@@ -87,6 +88,8 @@ final class SettingsWindow: NSWindowController {
     private let whisperModel = NSPopUpButton()
     private let whisperDownload = NSButton(title: "下载模型", target: nil, action: nil)
     private let whisperStatusLabel = NSTextField(labelWithString: "")
+    /// Popup title -> value handed to the core (catalogue name, or an absolute path).
+    private var whisperChoices: [(title: String, value: String)] = []
     private let engineLabel = NSTextField(labelWithString: "")
     private let statsLabel = NSTextField(labelWithString: "")
     private var engineObserver: NSObjectProtocol?
@@ -179,12 +182,15 @@ final class SettingsWindow: NSWindowController {
         asrModel.addItems(withTitles: ["stepaudio-2.5-asr-stream", "step-asr-1.1-stream", "stepaudio-2.5-asr", "step-asr"])
         asrModel.target = self; asrModel.action = #selector(saveRecognition)
         addRow("语音模型", control: asrModel, page: pages[3])
-        whisperModel.addItems(withTitles: ["tiny", "base", "small", "small-q5_1", "medium", "medium-q5_0", "large-v3-turbo", "large-v3-turbo-q5_0", "large-v3-turbo-q8_0"])
         whisperModel.target = self; whisperModel.action = #selector(changeWhisperModel)
         addRow("本地模型", control: whisperModel, page: pages[3])
         whisperDownload.target = self; whisperDownload.action = #selector(downloadWhisper)
         whisperDownload.bezelStyle = .rounded
-        addRow("模型下载", control: whisperDownload, page: pages[3])
+        let chooseModel = NSButton(title: "选择模型文件…", target: self, action: #selector(chooseWhisperModel))
+        let openModels = NSButton(title: "打开模型目录", target: self, action: #selector(openModelDirectory))
+        chooseModel.bezelStyle = .rounded
+        openModels.bezelStyle = .rounded
+        addRow("模型来源", control: NSStackView(views: [whisperDownload, chooseModel, openModels]), page: pages[3])
         for label in [whisperStatusLabel, engineLabel, statsLabel] {
             label.font = .systemFont(ofSize: 12)
             label.textColor = .secondaryLabelColor
@@ -258,24 +264,66 @@ final class SettingsWindow: NSWindowController {
         rewriteEngine.selectItem(at: settings.rewriteEngine == "local" ? 1 : 0)
         rewriteEngine.item(at: 1)?.title = SemanticRewriter.localIsAvailable ? "本地 · Apple" : "本地 · Apple（不可用）"
         provider.selectItem(at: ["apple", "stepfun", "whisper"].firstIndex(of: settings.asrProvider) ?? 0)
-        whisperModel.selectItem(withTitle: settings.whisperModel)
+        reloadWhisperChoices()
         asrModel.selectItem(withTitle: settings.asrModel)
         rewriteModel.stringValue = settings.rewriteModel
         for (name, popup) in choices { popup.selectItem(withTitle: buttons.action(for: name).title) }
         refreshStatus()
     }
-    private func refreshWhisperStatus() {
-        guard let catalog = CoreHost.modelCatalog().first(where: { ($0["name"] as? String) == settings.whisperModel }) else {
-            whisperStatusLabel.stringValue = ""
-            return
+    private var selectedWhisperValue: String {
+        let index = whisperModel.indexOfSelectedItem
+        guard index >= 0, index < whisperChoices.count else { return settings.whisperModel }
+        return whisperChoices[index].value
+    }
+
+    /// Builds the model list from what the core can actually see, so models the user drops
+    /// into the directory (or picks from disk) are selectable too.
+    private func reloadWhisperChoices() {
+        let catalog = CoreHost.modelCatalog()
+        let current = settings.whisperModel
+        var choices: [(title: String, value: String)] = []
+
+        for model in catalog {
+            guard let name = model["name"] as? String else { continue }
+            let installed = (model["installed"] as? Bool) ?? false
+            let builtin = (model["builtin"] as? Bool) ?? true
+            let size = model["sizeMb"] as? Int ?? 0
+            let path = model["path"] as? String ?? ""
+            var title = name
+            if !installed { title += "（需下载 \(size) MB）" }
+            if !builtin { title += "（自定义）" }
+            choices.append((title, builtin ? name : path))
         }
-        let installed = (catalog["installed"] as? Bool) ?? false
-        let size = catalog["sizeMb"] as? Int ?? 0
-        let quality = catalog["quality"] as? String ?? ""
-        whisperStatusLabel.stringValue = installed
-            ? "已下载 · \(quality)"
-            : "未下载（约 \(size) MB）· \(quality)"
-        whisperDownload.title = installed ? "重新下载" : "下载模型"
+
+        if !current.isEmpty && !choices.contains(where: { $0.value == current }) {
+            let name = (current as NSString).lastPathComponent
+            choices.append(("模型文件 \(name)", current))
+        }
+
+        whisperChoices = choices
+        whisperModel.removeAllItems()
+        whisperModel.addItems(withTitles: choices.map(\.title))
+        if let index = choices.firstIndex(where: { $0.value == current }) {
+            whisperModel.selectItem(at: index)
+        }
+    }
+
+    private func refreshWhisperStatus() {
+        let selected = selectedWhisperValue
+        if let catalog = CoreHost.modelCatalog().first(where: { ($0["name"] as? String) == settings.whisperModel }) {
+            let installed = (catalog["installed"] as? Bool) ?? false
+            let size = catalog["sizeMb"] as? Int ?? 0
+            let quality = catalog["quality"] as? String ?? ""
+            whisperStatusLabel.stringValue = installed
+                ? "已下载 · \(quality)"
+                : "未下载（约 \(size) MB）· \(quality)"
+            whisperDownload.title = installed ? "重新下载" : "下载模型"
+        } else {
+            whisperStatusLabel.stringValue = "自定义模型：\(selected)"
+            whisperDownload.title = "下载模型"
+        }
+        let isBuiltin = !selected.contains("/")
+        whisperDownload.isEnabled = isBuiltin
         if let backend = EngineStatus.shared.backend {
             engineLabel.stringValue = "本地引擎：\(backend.active)（已编译 \(backend.compiled.joined(separator: " / "))）"
         } else {
@@ -312,7 +360,7 @@ final class SettingsWindow: NSWindowController {
         guard saveKey(recognitionKey, purpose: .recognition, status: recognitionStatus) else { return }
         settings.asrProvider = ["apple", "stepfun", "whisper"][provider.indexOfSelectedItem]
         settings.asrModel = asrModel.titleOfSelectedItem ?? "stepaudio-2.5-asr-stream"
-        settings.whisperModel = whisperModel.titleOfSelectedItem ?? "large-v3-turbo-q5_0"
+        settings.whisperModel = selectedWhisperValue
         recognitionStatus.stringValue = "识别配置已保存，下次录音生效"
         NotificationCenter.default.post(name: .vibeboardConfigurationChanged, object: nil)
         refreshStatus()
@@ -350,13 +398,34 @@ final class SettingsWindow: NSWindowController {
         AppleSpeechProvider.requestAuthorization { _ in DispatchQueue.main.async { self.refreshStatus() } }
     }
     @objc private func changeWhisperModel() {
-        settings.whisperModel = whisperModel.titleOfSelectedItem ?? "large-v3-turbo-q5_0"
+        settings.whisperModel = selectedWhisperValue
         NotificationCenter.default.post(name: .vibeboardConfigurationChanged, object: nil)
         refreshWhisperStatus()
     }
 
+    @objc private func chooseWhisperModel() {
+        let panel = NSOpenPanel()
+        panel.title = "选择 Whisper 模型文件"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [UTType(filenameExtension: "bin") ?? .data]
+        if panel.runModal() == .OK, let url = panel.url {
+            settings.whisperModel = url.path
+            reloadWhisperChoices()
+            refreshWhisperStatus()
+            NotificationCenter.default.post(name: .vibeboardConfigurationChanged, object: nil)
+        }
+    }
+
+    @objc private func openModelDirectory() {
+        let path = CoreHost.modelDirectory()
+        guard !path.isEmpty else { return }
+        try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+    }
+
     @objc private func downloadWhisper() {
-        let name = whisperModel.titleOfSelectedItem ?? settings.whisperModel
+        let name = selectedWhisperValue
         whisperDownload.isEnabled = false
         whisperStatusLabel.stringValue = "准备下载 \(name)…"
         CoreHost.downloadModel(name, progress: { [weak self] fraction, received in

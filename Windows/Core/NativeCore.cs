@@ -91,6 +91,9 @@ internal static class Native
     internal static extern int vb_model_available([MarshalAs(UnmanagedType.LPUTF8Str)] string name);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern IntPtr vb_model_dir();
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int vb_model_remove(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string name, out IntPtr error);
 
@@ -124,7 +127,15 @@ public sealed record LocalEngineStats(
 
 public sealed record LocalBackendInfo(string Active, string[] Compiled, string SystemInfo);
 
-public sealed record ModelInfo(string Name, string FileName, int SizeMb, string Quality, bool Installed, string Path);
+public sealed record ModelInfo(
+    string Name,
+    string FileName,
+    int SizeMb,
+    string Quality,
+    bool Installed,
+    string Path,
+    bool Builtin,
+    int ActualSizeMb);
 
 /// <summary>Owns the core handle and exposes typed events to the WPF layer.</summary>
 public sealed class NativeCore : IDisposable
@@ -371,7 +382,9 @@ public sealed class NativeCore : IDisposable
                 item.GetProperty("sizeMb").GetInt32(),
                 item.TryGetProperty("quality", out var quality) ? quality.GetString() ?? "" : "",
                 item.TryGetProperty("installed", out var installed) && installed.GetBoolean(),
-                item.TryGetProperty("path", out var path) ? path.GetString() ?? "" : ""
+                item.TryGetProperty("path", out var path) ? path.GetString() ?? "" : "",
+                !item.TryGetProperty("builtin", out var builtin) || builtin.GetBoolean(),
+                item.TryGetProperty("actualSizeMb", out var actual) ? actual.GetInt32() : 0
             )).ToList();
         }
         catch
@@ -385,6 +398,15 @@ public sealed class NativeCore : IDisposable
     }
 
     public static bool ModelInstalled(string name) => Native.vb_model_available(name) != 0;
+
+    /// Directory users can drop `ggml-*.bin` files into.
+    public static string ModelDirectory()
+    {
+        var pointer = Native.vb_model_dir();
+        if (pointer == IntPtr.Zero) return "";
+        try { return Marshal.PtrToStringUTF8(pointer) ?? ""; }
+        finally { Native.vb_string_free(pointer); }
+    }
 
     public static string? RemoveModel(string name)
     {

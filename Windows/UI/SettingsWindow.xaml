@@ -34,8 +34,10 @@
 
                     <TextBlock Text="本地 Whisper 模型" FontWeight="SemiBold" Margin="0,16,0,6" />
                     <StackPanel Orientation="Horizontal">
-                        <ComboBox x:Name="WhisperModelCombo" Width="180" />
+                        <ComboBox x:Name="WhisperModelCombo" Width="220" SelectionChanged="OnWhisperModelChanged" />
                         <Button x:Name="DownloadButton" Content="下载模型" Width="96" Margin="10,0,0,0" Click="OnDownloadModel" />
+                        <Button Content="选择模型文件…" Width="112" Margin="8,0,0,0" Click="OnChooseModel" />
+                        <Button Content="打开模型目录" Width="104" Margin="8,0,0,0" Click="OnOpenModelDir" />
                     </StackPanel>
                     <ProgressBar x:Name="DownloadProgress" Height="6" Margin="0,10,0,0" Visibility="Collapsed" />
                     <TextBlock x:Name="WhisperStatusText" Foreground="#FF666666" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0" />

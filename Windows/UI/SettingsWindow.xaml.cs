@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Windows;
 using VibeBoardPlus.Core;
 using ComboBox = System.Windows.Controls.ComboBox;
+using SelectionChangedEventArgs = System.Windows.Controls.SelectionChangedEventArgs;
 using StackPanel = System.Windows.Controls.StackPanel;
 using TextBlock = System.Windows.Controls.TextBlock;
 using Orientation = System.Windows.Controls.Orientation;
@@ -16,7 +17,8 @@ public partial class SettingsWindow : Window
     private readonly Dictionary<string, ComboBox> _buttonChoices = new();
     private readonly List<OutputMode> _modes = new() { OutputMode.Overlay, OutputMode.LiveInput, OutputMode.PasteOnCompletion };
     private readonly List<string> _providers = new() { "whisper", "stepfun", "external" };
-    private readonly List<string> _models = new() { "tiny", "base", "small", "small-q5_1", "medium", "medium-q5_0", "large-v3-turbo", "large-v3-turbo-q5_0", "large-v3-turbo-q8_0" };
+    /// Display title -> value passed to the core (catalogue name or absolute path).
+    private readonly List<(string Title, string Value)> _whisperChoices = new();
 
     public SettingsWindow(AppSettings settings)
     {
@@ -25,7 +27,7 @@ public partial class SettingsWindow : Window
 
         OutputModeCombo.ItemsSource = _modes.Select(mode => mode.Label()).ToList();
         ProviderCombo.ItemsSource = new[] { "本地 Whisper（离线）", "StepFun 官方 API（云端）", "Windows 自带语音识别" };
-        WhisperModelCombo.ItemsSource = _models;
+        ReloadWhisperChoices();
         AsrModelCombo.ItemsSource = new[]
         {
             "stepaudio-2.5-asr-stream", "step-asr-1.1-stream", "stepaudio-2.5-asr", "step-asr",
@@ -61,7 +63,7 @@ public partial class SettingsWindow : Window
 
         var providerIndex = _providers.IndexOf(_settings.AsrProvider);
         ProviderCombo.SelectedIndex = providerIndex >= 0 ? providerIndex : 0;
-        WhisperModelCombo.SelectedItem = _settings.WhisperModel;
+        SelectWhisperValue(_settings.WhisperModel);
         AsrModelCombo.SelectedItem = _settings.AsrModel;
         RecognitionKeyBox.Password = "";
 
@@ -78,14 +80,59 @@ public partial class SettingsWindow : Window
         VersionText.Text = $"VibeBoard Plus {typeof(SettingsWindow).Assembly.GetName().Version} · 内核 v{NativeCore.Version()}";
     }
 
+    private string SelectedWhisperValue
+    {
+        get
+        {
+            var index = WhisperModelCombo.SelectedIndex;
+            return index >= 0 && index < _whisperChoices.Count ? _whisperChoices[index].Value : _settings.WhisperModel;
+        }
+    }
+
+    private void SelectWhisperValue(string value)
+    {
+        var index = _whisperChoices.FindIndex(choice => choice.Value == value);
+        if (index < 0)
+        {
+            var name = System.IO.Path.GetFileName(value);
+            _whisperChoices.Add(($"模型文件 {name}", value));
+            WhisperModelCombo.ItemsSource = _whisperChoices.Select(choice => choice.Title).ToList();
+            index = _whisperChoices.Count - 1;
+        }
+        WhisperModelCombo.SelectedIndex = index;
+    }
+
+    /// Model list comes from the core: catalogue entries plus anything found in the models
+    /// directory, plus the value currently configured (which may be an arbitrary path).
+    private void ReloadWhisperChoices()
+    {
+        _whisperChoices.Clear();
+        foreach (var model in NativeCore.ModelCatalog())
+        {
+            var title = model.Name;
+            if (!model.Installed) title += $"（需下载 {model.SizeMb} MB）";
+            if (!model.Builtin) title += "（自定义）";
+            _whisperChoices.Add((title, model.Builtin ? model.Name : model.Path));
+        }
+        WhisperModelCombo.ItemsSource = _whisperChoices.Select(choice => choice.Title).ToList();
+        SelectWhisperValue(_settings.WhisperModel);
+    }
+
+    private void OnWhisperModelChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded && _whisperChoices.Count == 0) return;
+        RefreshModels();
+    }
+
     private void RefreshModels()
     {
-        var catalog = NativeCore.ModelCatalog();
-        var selected = WhisperModelCombo.SelectedItem as string ?? _settings.WhisperModel;
-        var model = catalog.FirstOrDefault(item => item.Name == selected);
+        var selected = SelectedWhisperValue;
+        var model = NativeCore.ModelCatalog().FirstOrDefault(item =>
+            item.Name == selected || item.Path == selected);
         if (model is null)
         {
-            WhisperStatusText.Text = "未找到模型信息";
+            WhisperStatusText.Text = $"自定义模型：{selected}";
+            DownloadButton.IsEnabled = false;
             return;
         }
 
@@ -93,6 +140,37 @@ public partial class SettingsWindow : Window
             ? $"已下载 · {model.Quality} · {model.Path}"
             : $"未下载（约 {model.SizeMb} MB）· {model.Quality}";
         DownloadButton.Content = model.Installed ? "重新下载" : "下载模型";
+        DownloadButton.IsEnabled = model.Builtin;
+    }
+
+    private void OnChooseModel(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "选择 Whisper 模型文件",
+            Filter = "Whisper 模型 (*.bin)|*.bin|所有文件 (*.*)|*.*",
+            CheckFileExists = true,
+        };
+        if (dialog.ShowDialog() != true) return;
+        _settings.WhisperModel = dialog.FileName;
+        ReloadWhisperChoices();
+        RefreshModels();
+        (System.Windows.Application.Current as App)?.ReloadConfiguration();
+    }
+
+    private void OnOpenModelDir(object sender, RoutedEventArgs e)
+    {
+        var path = NativeCore.ModelDirectory();
+        if (string.IsNullOrEmpty(path)) return;
+        try
+        {
+            System.IO.Directory.CreateDirectory(path);
+            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"打开模型目录失败：{ex.Message}");
+        }
     }
 
     private void RefreshEngine()
@@ -111,7 +189,7 @@ public partial class SettingsWindow : Window
 
     private void OnDownloadModel(object sender, RoutedEventArgs e)
     {
-        var name = WhisperModelCombo.SelectedItem as string ?? _settings.WhisperModel;
+        var name = SelectedWhisperValue;
         DownloadButton.IsEnabled = false;
         DownloadProgress.Visibility = Visibility.Visible;
         DownloadProgress.Value = 0;
@@ -151,7 +229,7 @@ public partial class SettingsWindow : Window
 
         var providerIndex = Math.Max(0, ProviderCombo.SelectedIndex);
         _settings.AsrProvider = _providers[providerIndex];
-        _settings.WhisperModel = WhisperModelCombo.SelectedItem as string ?? _settings.WhisperModel;
+        _settings.WhisperModel = SelectedWhisperValue;
         _settings.AsrModel = AsrModelCombo.SelectedItem as string ?? _settings.AsrModel;
 
         if (!string.IsNullOrWhiteSpace(RecognitionKeyBox.Password))
