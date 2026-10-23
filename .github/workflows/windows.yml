@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - "Windows/**"
+      - "Assets/**"
+      - "Assets/**"
       - "core/**"
       - ".github/workflows/windows.yml"
   pull_request:

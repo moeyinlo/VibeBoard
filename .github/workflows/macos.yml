@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - "Sources/**"
+      - "Assets/**"
+      - "Assets/**"
       - "Tests/**"
       - "Package.swift"
       - "scripts/**"
