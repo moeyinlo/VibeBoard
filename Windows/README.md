@@ -42,6 +42,12 @@ CI（`.github/workflows/windows.yml`）在 `windows-latest` 上构建内核 DLL 
 | 语义整理 | 开关、整理模型、独立 Key、云端连通性测试 |
 | 关于 | 版本、内核版本、日志路径、whisper.cpp 设备报告 |
 
+## 图标
+
+- exe 图标：`Assets/AppIcon.ico`（csproj `ApplicationIcon`）
+- 托盘图标：同一份 ico，以程序集资源方式加载；加载失败时回退到内置波形图形
+- 重新生成：`python3 scripts/make_icons.py <logo.png>`（同时产出 macOS 的 icns）
+
 ## 功能
 
 - 托盘菜单：状态、显示/复制最近结果、取消识别、打开主窗口、打开日志、退出

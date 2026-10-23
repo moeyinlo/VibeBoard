@@ -2,6 +2,25 @@
 
 macOS menu bar client for VibeBoard hardware. Audio comes from the USB device microphone.
 
+## App Icon
+
+The brand mark lives in `Assets/`:
+
+| File | Used by |
+|---|---|
+| `AppIcon.icns` | macOS bundle (`CFBundleIconFile`), copied by `build_app.sh` / `package_app.sh` |
+| `AppIcon.ico` | Windows exe (`ApplicationIcon`) and tray icon (assembly resource) |
+| `AppIcon-1024.png` | master PNG for docs, stores, CI |
+
+All three are generated from one square logo; regenerate after changing the artwork:
+
+```sh
+python3 scripts/make_icons.py ~/Downloads/logo.png
+```
+
+The script builds a white squircle on Apple's 824/1024 grid, clips the artwork to it and
+writes every size macOS and Windows need, so the two shells never drift apart.
+
 ## Build And Test
 
 ```sh

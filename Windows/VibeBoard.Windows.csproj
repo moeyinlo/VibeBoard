@@ -11,6 +11,7 @@
     <AssemblyName>VibeBoardPlus</AssemblyName>
     <RootNamespace>VibeBoardPlus</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\Assets\AppIcon.ico</ApplicationIcon>
     <!-- Allows building/publishing the Windows app from macOS/Linux CI as well. -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
@@ -22,6 +23,11 @@
     <!-- Built by CI from core/crates/vibeboard-core (release profile). -->
     <VibeBoardCoreDir Condition="'$(VibeBoardCoreDir)' == ''">$(MSBuildThisFileDirectory)..\core\target\release\</VibeBoardCoreDir>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 托盘图标从程序集资源读取 -->
+    <Resource Include="..\Assets\AppIcon.ico" Link="Assets\AppIcon.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <None Include="$(VibeBoardCoreDir)vibeboard_core.dll"

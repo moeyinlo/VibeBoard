@@ -33,7 +33,7 @@ public sealed class TrayController : IDisposable
 
         _icon = new NotifyIcon
         {
-            Icon = CreateIcon(),
+            Icon = LoadAppIcon() ?? CreateIcon(),
             Text = "VibeBoard Plus",
             Visible = true,
             ContextMenuStrip = menu,
@@ -79,7 +79,25 @@ public sealed class TrayController : IDisposable
         }
     }
 
-    /// <summary>Draws a simple waveform glyph so the app needs no icon asset.</summary>
+    /// <summary>Loads the brand icon shipped as an assembly resource.</summary>
+    private static Icon? LoadAppIcon()
+    {
+        try
+        {
+            var uri = new Uri("pack://application:,,,/Assets/AppIcon.ico", UriKind.Absolute);
+            var stream = System.Windows.Application.GetResourceStream(uri)?.Stream;
+            if (stream is null) return null;
+            using var icon = new Icon(stream);
+            return (Icon)icon.Clone();
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"加载应用图标失败，使用内置图形：{ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>Fallback: draws a simple waveform glyph.</summary>
     private static Icon CreateIcon()
     {
         const int size = 32;
