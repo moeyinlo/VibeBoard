@@ -5,7 +5,6 @@ on:
     paths:
       - "Sources/**"
       - "Assets/**"
-      - "Assets/**"
       - "Tests/**"
       - "Package.swift"
       - "scripts/**"
@@ -13,6 +12,7 @@ on:
       - ".github/workflows/macos.yml"
   pull_request:
     paths:
+      - "Assets/**"
       - "Sources/**"
       - "Tests/**"
       - "Package.swift"

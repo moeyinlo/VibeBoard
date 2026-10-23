@@ -5,11 +5,11 @@ on:
     paths:
       - "Windows/**"
       - "Assets/**"
-      - "Assets/**"
       - "core/**"
       - ".github/workflows/windows.yml"
   pull_request:
     paths:
+      - "Assets/**"
       - "Windows/**"
       - "core/**"
   workflow_dispatch:
